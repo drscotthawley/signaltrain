@@ -45,15 +45,13 @@ def train_model(model, optimizer, criterion, start_epoch = 0, max_epochs=100,
         loss.backward(retain_graph=True)      # retain_graph=True needed for RNNs, it seems
         optimizer.step()
 
-
-
     return model
 
 
 
 # One additional model evaluation on new 'test; data
 def eval_model(model, sig_length, fs):
-    input_var, target_var = fxl.utils.make_signals(sig_length, fs)
+    input_var, target_var = fxl.utils.make_signals(sig_length, fs, num_waves=1)
     wave_form = model(input_var)    # run network forward
     outfile = 'final.png'
     print("Saving final Test evaluation report to",outfile,": ",end="")
@@ -82,6 +80,7 @@ def main():
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
     args = parser.parse_args()
+    print("args = ",args)
     sig_length = args.length
     fs = args.fs
 
@@ -91,7 +90,7 @@ def main():
     else:
         model = fxl.models.SpecEncDec()
     criterion = torch.nn.MSELoss()
-    optimizer = torch.optim.Adam([ {'params': model.parameters()}], lr = 0.0003)
+    optimizer = torch.optim.Adam([ {'params': model.parameters()}], lr = 0.0003,  amsgrad=True)#, weight_decay=0.01)
 
 
 
