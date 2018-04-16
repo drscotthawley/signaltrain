@@ -11,8 +11,8 @@ import os
 import fxlearn as fxl    # This is where I'm putting things...
 
 def train_model(model, optimizer, criterion, start_epoch = 0, max_epochs=100,
-    batch_size=50, sig_length=8192, fs=44100.,
-    tol=1e-14, change_every=10, save_every=100, plot_every=500):
+    batch_size=100, sig_length=8192, fs=44100.,
+    tol=1e-14, change_every=10, save_every=100, plot_every=200):
 
     for epoch_iter in range(max_epochs - start_epoch):
         epoch = start_epoch + epoch_iter
@@ -35,7 +35,7 @@ def train_model(model, optimizer, criterion, start_epoch = 0, max_epochs=100,
                 fxl.utils.save_checkpoint({'epoch': epoch + 1, 'state_dict': model.state_dict(), #'best_prec1': loss_val,
                     'optimizer' : optimizer.state_dict(),}, False)
             if (0 == epoch % plot_every):
-                outfile = 'progress.png'
+                outfile = 'progress.pdf'
                 print("Saving progress report to ",outfile,": ",end="")
                 fxl.utils.make_report(input_var, target_var, wave_form, outfile=outfile, epoch=epoch)
 
@@ -51,9 +51,9 @@ def train_model(model, optimizer, criterion, start_epoch = 0, max_epochs=100,
 
 # One additional model evaluation on new 'test; data
 def eval_model(model, sig_length, fs):
-    input_var, target_var = fxl.utils.make_signals(sig_length, fs, num_waves=1)
+    input_var, target_var = fxl.utils.make_signals(sig_length, fs, num_waves=4)
     wave_form = model(input_var)    # run network forward
-    outfile = 'final.png'
+    outfile = 'final.pdf'
     print("Saving final Test evaluation report to",outfile,": ",end="")
     fxl.utils.make_report(input_var, target_var, wave_form, outfile=outfile)
     return
@@ -75,6 +75,8 @@ def main():
     parser.add_argument('--epochs', default=10000, type=int, help="Number of iterations to train for")
     parser.add_argument('--length', default=8192, type=int, help="Length of audio signals")
     parser.add_argument('--fs', default=44100, type=int, help="Sample rate in Hertz")
+    parser.add_argument('--change', default=10, type=int, help="Changed data every this many epochs")
+
     parser.add_argument('--model', default='spectral', type=str,
                     help="Model type: 'spectral' (default) or 'seq2seq'")
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
@@ -113,7 +115,7 @@ def main():
 
     # Training Loop
     model = train_model(model, optimizer, criterion, start_epoch=start_epoch, max_epochs=args.epochs,
-        fs=fs, sig_length=sig_length)
+        fs=fs, sig_length=sig_length, change_every=args.change)
 
     # Show performance on test data:
     eval_model(model, sig_length, fs)
