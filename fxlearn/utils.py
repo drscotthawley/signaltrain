@@ -8,6 +8,10 @@ import matplotlib.pyplot as plt
 import torch
 from torch.autograd import Variable
 import shutil
+import librosa
+import os
+from multiprocessing.pool import ThreadPool as Pool
+from functools import partial
 
 
 # my cheap way of showing loss 'graphically':  "*" farther right means larger loss (tilt your head to the right)
@@ -22,28 +26,37 @@ def print_loss(loss_val, log=True):
     return
 
 
+
+def gen_pitch_shifted_pair(input_sigs, target_sigs, fs, amp_fac, freq_fac, num_waves, batch_index):
+    sig_length = input_sigs.shape[1]
+    for n in range(num_waves):
+        # randomize the signal
+        amp = 0.2*np.random.rand()    # stay bounded well below 1.0
+        freq = 2 * np.pi * ( 400 + 400*np.random.rand() )
+
+        # learn the adaptive filter for the following input -> target pair: different amp, freq & phase
+        input_sigs[batch_index]  +=           amp * torch.cos(           freq * torch.arange(sig_length) / fs)
+        target_sigs[batch_index] += amp_fac * amp * torch.sin(freq_fac * freq * torch.arange(sig_length) / fs)
+    return
+
+
 # currently creates pitch-shifted collections of sine waves
-def make_signals(sig_length, fs=44100., amp_fac=0.43, freq_fac = 0.35, num_waves = 20, batch_size=20):
+def make_signals(sig_length, fs=44100., amp_fac=0.43, freq_fac=0.35, num_waves=20, batch_size=20, parallel=True):
 
-    input_sig = torch.zeros((batch_size,sig_length))
-    target_sig = torch.zeros((batch_size,sig_length))
+    input_sigs = torch.zeros((batch_size,sig_length))
+    target_sigs = torch.zeros((batch_size,sig_length))
 
-    # Make the problem harder: at t=0 everything's in phase; cut that out by looking at random window
-    buf_size = sig_length * 1.5
-    start_ind = 0 # int( sig_length * (0.1 + 0.4*np.random.rand()) )
+    # generate them in parallel threads that all share the input_sigs and target_sigs arrays
+    batch_indices = tuple( range(batch_size) )
+    if (parallel):
+        pool = Pool()
+        pool.map( partial(gen_pitch_shifted_pair, input_sigs, target_sigs, fs, amp_fac, freq_fac, num_waves), batch_indices)
+    else:
+        for batch_index in batch_indices:
+            gen_pitch_shifted_pair(input_sigs, target_sigs, fs, amp_fac, freq_fac, num_waves, batch_index)
 
-    for batch in range(batch_size):
-        for n in range(num_waves):
-            # randomize the signal
-            amp = 0.2*np.random.rand()    # stay bounded well below 1.0
-            freq = 2 * np.pi * ( 400 + 400*np.random.rand() )
-
-            # learn the adaptive filter for the following input -> target pair: different amp, freq & phase
-            input_sig[batch]  +=           amp * torch.cos(           freq * torch.arange(buf_size) / fs)[start_ind:start_ind+sig_length]
-            target_sig[batch] += amp_fac * amp * torch.sin(freq_fac * freq * torch.arange(buf_size) / fs)[start_ind:start_ind+sig_length]
-
-    input_var = Variable(input_sig)
-    target_var = Variable(target_sig, requires_grad=False)
+    input_var = Variable(input_sigs)
+    target_var = Variable(target_sigs, requires_grad=False)
     if torch.has_cudnn:
         input_var = input_var.cuda()
         target_var = target_var.cuda()
@@ -87,5 +100,9 @@ def make_report(input_var, target_var, wave_form, outfile=None, epoch=None, show
         plt.savefig(outfile)
         plt.close(fig)
 
+    sr = 44100
+    librosa.output.write_wav('progress_input.wav', input_sig, sr)
+    librosa.output.write_wav('progress_output.wav', wave_form, sr)
+    librosa.output.write_wav('progress_target.wav', target_sig, sr)
 
 # EOF
