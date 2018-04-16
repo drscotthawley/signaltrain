@@ -51,6 +51,8 @@ def make_signals(sig_length, fs=44100., amp_fac=0.43, freq_fac=0.35, num_waves=2
     if (parallel):
         pool = Pool()
         pool.map( partial(gen_pitch_shifted_pair, input_sigs, target_sigs, fs, amp_fac, freq_fac, num_waves), batch_indices)
+        pool.close()
+        pool.join()
     else:
         for batch_index in batch_indices:
             gen_pitch_shifted_pair(input_sigs, target_sigs, fs, amp_fac, freq_fac, num_waves, batch_index)
@@ -72,7 +74,7 @@ def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
 
 
 
-def make_report(input_var, target_var, wave_form, outfile=None, epoch=None, show_input=False):
+def make_report(input_var, target_var, wave_form, outfile=None, epoch=None, show_input=False, device=''):
     wave_form = wave_form.squeeze(1).data.cpu().numpy()[0, :]
     input_sig = input_var.squeeze(1).data.cpu().numpy()[0, :]
     target_sig = target_var.squeeze(1).data.cpu().numpy()[0, :]
@@ -101,8 +103,8 @@ def make_report(input_var, target_var, wave_form, outfile=None, epoch=None, show
         plt.close(fig)
 
     sr = 44100
-    librosa.output.write_wav('progress_input.wav', input_sig, sr)
-    librosa.output.write_wav('progress_output.wav', wave_form, sr)
-    librosa.output.write_wav('progress_target.wav', target_sig, sr)
+    librosa.output.write_wav('progress'+device+'_input.wav', input_sig, sr)
+    librosa.output.write_wav('progress'+device+'_output.wav', wave_form, sr)
+    librosa.output.write_wav('progress'+device+'_target.wav', target_sig, sr)
 
 # EOF

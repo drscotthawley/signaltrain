@@ -30,14 +30,16 @@ def train_model(model, optimizer, criterion, start_epoch = 0, max_epochs=100,
         fxl.utils.print_loss(loss_val)
 
         if (epoch > start_epoch):
+            device = str(torch.cuda.current_device())
             if (0 == epoch % save_every) or (epoch >= max_epochs-1):
-                print("Saving checkpoint...")
-                fxl.utils.save_checkpoint({'epoch': epoch + 1, 'state_dict': model.state_dict(), #'best_prec1': loss_val,
-                    'optimizer' : optimizer.state_dict(),}, False)
+                checkpoint_name = 'checkpoint'+device+'.pth.tar'
+                print("Saving checkpoint in ",checkpoint_name)
+                fxl.utils.save_checkpoint({'epoch': epoch + 1, 'state_dict': model.state_dict(),
+                    'optimizer' : optimizer.state_dict(),}, False, filename=checkpoint_name)
             if (0 == epoch % plot_every):
-                outfile = 'progress.pdf'
+                outfile = 'progress'+device+'.pdf'
                 print("Saving progress report to ",outfile,": ",end="")
-                fxl.utils.make_report(input_var, target_var, wave_form, outfile=outfile, epoch=epoch)
+                fxl.utils.make_report(input_var, target_var, wave_form, outfile=outfile, epoch=epoch, device=device)
 
         if loss.data.cpu().numpy() < tol:
             break
@@ -61,20 +63,17 @@ def eval_model(model, sig_length, fs):
 
 
 def main():
-    if torch.has_cudnn:
-        print('Running on CUDA')
-    else:
-        print('No CUDA')
-
     # useful for ensuring similar initializations when testing different models
     torch.manual_seed(1)
     np.random.seed(1)
+
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='fxlearn')
     parser.add_argument('--epochs', default=10000, type=int, help="Number of iterations to train for")
     parser.add_argument('--length', default=8192, type=int, help="Length of audio signals")
     parser.add_argument('--fs', default=44100, type=int, help="Sample rate in Hertz")
+    parser.add_argument('--device', default=0, type=int, help="CUDA device to use (e.g. 0 or 1)")
     parser.add_argument('--change', default=10, type=int, help="Changed data every this many epochs")
 
     parser.add_argument('--model', default='spectral', type=str,
@@ -85,6 +84,14 @@ def main():
     print("args = ",args)
     sig_length = args.length
     fs = args.fs
+
+    if torch.has_cudnn:
+        torch.cuda.set_device(args.device)
+        name = torch.cuda.get_device_name(args.device)
+        print('Running on CUDA: device_count =',torch.cuda.device_count(),'. Using device ',args.device,':',name)
+    else:
+        print('No CUDA')
+
 
     # Set up model and training criteria
     if ('seq2seq' == args.model):

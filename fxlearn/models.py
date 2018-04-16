@@ -62,9 +62,9 @@ class CNNAuto(nn.Module):   # 'convolutional autoencoder'
 class SpecEncDec(nn.Module):  # 'spectral encoder-decoder'
     def __init__(self):
         super(SpecEncDec, self).__init__()
-        self.ft_size = 1024
-        self.w_size = 2048
-        self.hop_size = 1024
+        self.ft_size = 4096
+        self.w_size = self.ft_size * 2
+        self.hop_size = self.ft_size
         self.encoder = front_end.Analysis(ft_size=self.ft_size, w_size=self.w_size, hop_size=self.hop_size)
         self.decoder = front_end.Synthesis(ft_size=self.ft_size, w_size=self.w_size, hop_size=self.hop_size)
         #self.encoder = front_end.FNNAnalysis()   # gives matrix mult. size mismatches
@@ -72,13 +72,15 @@ class SpecEncDec(nn.Module):  # 'spectral encoder-decoder'
 
         #define some other other layers which we may or may not use (just messing around)
         self.cnn = CNNAuto()
-        '''
         self.full_dim = self.ft_size
-        self.small_dim = self.ft_size
         self.dense = nn.Linear(self.full_dim, self.full_dim)
+        self.act = nn.SELU()   # ReLU, LeakyReLU, ELU & SELU all yield similar performance in my tets so far
+
+        '''
+
+        self.small_dim = self.ft_size
 
         self.shrink = nn.Linear(self.full_dim, self.small_dim)  # fully connected layer
-        self.act = nn.SELU()   # ReLU, LeakyReLU, ELU & SELU all yield similar performance in my tets so far
 
         self.small = nn.Linear(self.small_dim, self.small_dim)
         self.grow = nn.Linear(self.small_dim, self.full_dim)  # fully connected layer
