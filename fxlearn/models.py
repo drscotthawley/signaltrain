@@ -59,19 +59,24 @@ class CNNAuto(nn.Module):   # 'convolutional autoencoder'
 
 # TODO: doesn't work yet. Unused.
 class LowPassLayer(nn.Module):
-    ''' Description:  This is a tunable 'reverse sigmoid' soft mask, which will get multiplied (element-wise)
-                      by the (vertical columns of) frequency spectrum, to serve as a low-pass filter.
-                      It has two parameters: the central frequency (from 0...1, scales with size of input)
-                      and a steepness parameter (also between -1.0=flat and 1.0=vertical)
-                      TODO: how do we best bound these to positive values?
+    '''
+    Description:
+    This is a tunable 'reverse sigmoid' soft mask, which will get multiplied (element-wise)
+    by the (vertical columns of) frequency spectrum, to serve as a low-pass filter.
+    It has two parameters: the central frequency (from 0...1, scales with size of input)
+    and a steepness parameter (-1.0=flat and 1.0=vertical)
 
-        Purpose:      Much of the loss-reduction in the final network output gets bound up in damping high-frequency noise.
-                      In theory we could let the network do this eventually, but this layer is to help converge faster.
+    Purpose:
+    Much of the loss-reduction in the final network output gets bound up in damping
+    high-frequency noise.  In theory we could let the network do
+    this eventually, but this layer is to help converge faster.
 
-        Note:         Demo & discussion, see ../docs/LowPassLayer.ipynb
-                      Layer-writing guide at https://discuss.pytorch.org/t/how-to-define-a-new-layer-with-autograd/351
+    Notes:
+    Discussion & demo at ../docs/LowPassLayer.ipynb
+    Layer-writing guide at https://discuss.pytorch.org/t/how-to-define-a-new-layer-with-autograd/351
 
-        TODO:          Make indices work with batch_size
+    TODO:
+    Make indices work with batch_size
     '''
     def __init__(self, bins):
         super(LowPassLayer, self).__init__()
