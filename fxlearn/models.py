@@ -57,6 +57,39 @@ class CNNAuto(nn.Module):   # 'convolutional autoencoder'
         y = self.layer_out(y)
         return y
 
+# TODO: doesn't work yet. Unused.
+class LowPassLayer(nn.Module):
+    ''' Description:  This is a tunable 'reverse sigmoid' soft mask, which will get multiplied (element-wise)
+                      by the (vertical columns of) frequency spectrum, to serve as a low-pass filter.
+                      It has two parameters: the central frequency (from 0...1, scales with size of input)
+                      and a steepness parameter (also between -1.0=flat and 1.0=vertical)
+                      TODO: how do we best bound these to positive values?
+
+        Purpose:      Much of the loss-reduction in the final network output gets bound up in damping high-frequency noise.
+                      In theory we could let the network do this eventually, but this layer is to help converge faster.
+
+        Note:         Demo & discussion, see ../docs/LowPassLayer.ipynb
+                      Layer-writing guide at https://discuss.pytorch.org/t/how-to-define-a-new-layer-with-autograd/351
+
+        TODO:          Make indices work with batch_size
+    '''
+    def __init__(self, bins):
+        super(LowPassLayer, self).__init__()
+        self.m = nn.Parameter(torch.zeros(1))      # steepness, tunable parameter, default is 0
+        self.b = nn.Parameter(torch.zeros(1))      # center, tunable parameter, default is 0
+        self.eps = 0.1
+        self.bins = bins
+        self.x = Variable(torch.linspace(0, bins-1, num=bins))
+
+    def forward(self, in_stft):
+        # given matrix A (n x m) and vector v (n elements), the operation we want is (A.T * v).T
+        #   This method is also the fastest: https://stackoverflow.com/questions/18522216/multiplying-across-in-a-numpy-array
+
+        m = self.m.expand_as(self.x)     # make it a 1-D vector of repeated numbers
+        b = self.b.expand_as(self.x)
+        mask = 1/(1+torch.exp( (1+m)/(1-m+self.eps)*10*(self.x/self.bins-(b+0.5)) )  )
+        out_stft = torch.transpose( torch.mm( torch.transpose(in_stft), mask ) )
+        return out_stft
 
 
 class SpecEncDec(nn.Module):  # 'spectral encoder-decoder'
