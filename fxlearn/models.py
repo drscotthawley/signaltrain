@@ -1,17 +1,24 @@
+
+
 __author__ = 'S.H. Hawley'
 
 # imports
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-
 import os
 import sys
 from . import transforms as front_end
 
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+
 
 class CNNAuto(nn.Module):   # 'convolutional autoencoder'
-    def __init__(self):
+    def __init__(self, finaldim):
         super(CNNAuto, self).__init__()
         self.io_channels = 1   # mono for now
         self.feature_channels = 4  # chose this arbitrarily. nothing sacred about this number!
@@ -20,44 +27,51 @@ class CNNAuto(nn.Module):   # 'convolutional autoencoder'
         self.scale_factor = 2
         self.layer_in = nn.Sequential(     # generates feature_channels times more data
             nn.Conv2d(self.io_channels, self.feature_channels, kernel_size=self.kernel_size, padding=self.pad),
-            #nn.BatchNorm2d(self.feature_channels),
-            nn.SELU()
-            )
+            nn.BatchNorm2d(self.feature_channels),
+            nn.LeakyReLU() )
 
         self.layer_mid = nn.Sequential(    # keeps number of feature channels the same
             nn.Conv2d(self.feature_channels, self.feature_channels, kernel_size=self.kernel_size, padding=self.pad),
-            #nn.BatchNorm2d(self.feature_channels),
-            nn.SELU()
-            )
+            nn.BatchNorm2d(self.feature_channels),
+            nn.LeakyReLU() )
 
         # Pooling and Un-Pooling
-        self.layer_shrink =  nn.Sequential( nn.MaxPool2d(self.scale_factor) )
-        self.layer_grow =  nn.Sequential( nn.Upsample(scale_factor=self.scale_factor, mode='bilinear') )
+        self.layer_pool = nn.MaxPool2d(self.scale_factor, padding=(1,0), return_indices=True)
+        self.layer_unpool = nn.MaxUnpool2d(self.scale_factor, padding=(1,0) )
+
+        self.layer_dropout = nn.Dropout2d()
 
         self.layer_out = nn.Sequential(     # combines feature channels back to original # of channels
             nn.Conv2d(self.feature_channels, self.io_channels, kernel_size=self.kernel_size, padding=self.pad),
-            #nn.BatchNorm2d(self.io_channels),
-            nn.SELU())
+            nn.BatchNorm2d(self.io_channels),
+            nn.LeakyReLU() )
 
     def forward(self, x):
-        y = self.layer_in(x)
-        '''  shrinking & growing is causing problems; disabled for now
-        y = self.layer_shrink(y)        #   \      /
-        y = self.layer_mid(y)
-        y = self.layer_shrink(y)        #    \   /
-        '''
-        y = self.layer_mid(y)
-        y = self.layer_mid(y)
+        #print("input           x.size() = ",x.size())
 
-        '''
-        y = self.layer_grow(y)          #    /   \
+        y = self.layer_in(x)
+        save_size = y.size()
+        #print("after 1st conv  y.size() = ",y.size())
+        '''  pooling & growing is causing problems; disabled for now '''
+        y, indices = self.layer_pool(y)   #   \      /
+        #y = self.layer_mid(y)
+        #y = self.layer_pool(y)           #    \   /
+        #y = self.layer_mid(y)
+        #y = self.layer_dropout(y)
         y = self.layer_mid(y)
-        y = self.layer_grow(y)          #  /      \
-        '''
+        #y = self.layer_dropout(y)
+        y = self.layer_mid(y)
+        y = self.layer_unpool(y, indices, output_size=save_size)      #    /   \
+        #print("after unpool    y.size() = ",y.size())
+
+        #y = self.layer_mid(y)
+        #y = self.layer_grow2(y)            #  /      \
         y = self.layer_out(y)
+        #print("after last conv y.size() = ",y.size())
+
         return y
 
-# TODO: doesn't work yet. Unused.
+# TODO: Doesn't improve results.  Unused.
 class LowPassLayer(nn.Module):
     '''
     Description:
@@ -74,74 +88,110 @@ class LowPassLayer(nn.Module):
     Notes:
     Discussion & demo at ../docs/LowPassLayer.ipynb
     Layer-writing guide at https://discuss.pytorch.org/t/how-to-define-a-new-layer-with-autograd/351
-
-    TODO:
-    Make indices work with batch_size
     '''
     def __init__(self, bins):
         super(LowPassLayer, self).__init__()
-        self.m = nn.Parameter(torch.zeros(1))      # steepness, tunable parameter, default is 0
-        self.b = nn.Parameter(torch.zeros(1))      # center, tunable parameter, default is 0
         self.eps = 0.1
         self.bins = bins
-        self.x = Variable(torch.linspace(0, bins-1, num=bins))
+        self.m = nn.Parameter(torch.zeros(1)).cuda()      # steepness, tunable parameter  # .cuda() actually freezes the value
+        self.b = nn.Parameter(torch.zeros(1)).cuda()     # center, tunable parameter
+        if torch.has_cudnn:
+            self.x = Variable(torch.linspace(0, bins-1, steps=bins)).cuda()
+        else:
+            self.x = Variable(torch.linspace(0, bins-1, steps=bins))
 
     def forward(self, in_stft):
-        # given matrix A (n x m) and vector v (n elements), the operation we want is (A.T * v).T
-        #   This method is also the fastest: https://stackoverflow.com/questions/18522216/multiplying-across-in-a-numpy-array
-
+        mval, bval = self.m.data.cpu().numpy()[0],  self.b.data.cpu().numpy()[0]
+        print(' m={:10.5e}'.format(mval),' b={:10.5e}'.format(bval),sep="",end="")
         m = self.m.expand_as(self.x)     # make it a 1-D vector of repeated numbers
         b = self.b.expand_as(self.x)
-        mask = 1/(1+torch.exp( (1+m)/(1-m+self.eps)*10*(self.x/self.bins-(b+0.5)) )  )
-        out_stft = torch.transpose( torch.mm( torch.transpose(in_stft), mask ) )
-        return out_stft
+        mask = 1.0/(1+torch.exp( (1+m)/(1-m+self.eps) *10* (self.x /self.bins-(b+0.5)) )  )
+        return in_stft * mask          # elementwise multiplication
 
 
-class SpecEncDec(nn.Module):  # 'spectral encoder-decoder'
+# Just including here as an example. Unused.
+# From https://discuss.pytorch.org/t/how-to-define-a-new-layer-with-autograd/351/3
+class Gaussian(nn.Module):
     def __init__(self):
+        super(Gaussian, self).__init__()
+        self.a = nn.Parameter(torch.zeros(1))
+        self.b = nn.Parameter(torch.zeros(1))
+        self.c = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x):
+        # unfortunately we don't have automatic broadcasting yet
+        a = self.a.expand_as(x)
+        b = self.b.expand_as(x)
+        c = self.c.expand_as(x)
+        return a * torch.exp((x - b)^2 / c)
+
+
+# 'spectral encoder-decoder'
+class SpecEncDec(nn.Module):
+    def __init__(self, ft_size=1024):
         super(SpecEncDec, self).__init__()
-        self.ft_size = 4096
+        self.ft_size = ft_size
         self.w_size = self.ft_size * 2
         self.hop_size = self.ft_size
-        self.encoder = front_end.Analysis(ft_size=self.ft_size, w_size=self.w_size, hop_size=self.hop_size)
-        self.decoder = front_end.Synthesis(ft_size=self.ft_size, w_size=self.w_size, hop_size=self.hop_size)
-        #self.encoder = front_end.FNNAnalysis()   # gives matrix mult. size mismatches
-        #self.decoder = front_end.FNNSynthesis()
+        #self.encoder = front_end.Analysis(ft_size=self.ft_size, w_size=self.w_size, hop_size=self.hop_size)
+        #self.decoder = front_end.Synthesis(ft_size=self.ft_size, w_size=self.w_size, hop_size=self.hop_size)
+
+
+        self.encoder = front_end.FNNAnalysis(ft_size=ft_size)   # gives matrix mult. size mismatches
+        self.decoder = front_end.FNNSynthesis(ft_size=ft_size)
 
         #define some other other layers which we may or may not use (just messing around)
-        self.cnn = CNNAuto()
-        self.full_dim = self.ft_size
+        self.cnn = CNNAuto(self.ft_size)
+        self.full_dim = int(ft_size/2 +1)
         self.dense = nn.Linear(self.full_dim, self.full_dim)
-        self.act = nn.SELU()   # ReLU, LeakyReLU, ELU & SELU all yield similar performance in my tets so far
 
-        '''
+        #self.batch = nn.BatchNorm2d(500)
+        #proj_dim = int(self.full_dim*1.5)
+        #self.proj = nn.Linear(self.full_dim, proj_dim )
+        #self.deproj = nn.Linear( proj_dim, self.full_dim)
 
-        self.small_dim = self.ft_size
-
-        self.shrink = nn.Linear(self.full_dim, self.small_dim)  # fully connected layer
-
-        self.small = nn.Linear(self.small_dim, self.small_dim)
-        self.grow = nn.Linear(self.small_dim, self.full_dim)  # fully connected layer
-        '''
-
+        self.act = nn.LeakyReLU()   # ReLU, LeakyReLU, ELU & SELU all yield similar performance in my tets so far
+        #self.filter = LowPassLayer(self.ft_size)
+        #self.dropout = torch.nn.Dropout2d(p=0.1)
 
     # Here's where we run the network forward (PyTorch takes care of backward)
     def forward(self, input_var):
-        x_ft = self.encoder(input_var)
+        y = input_var.unsqueeze(0)
+        real, imag = self.encoder(y)
+        #print("real.size()  =",real.size(),", imag.size() =",imag.size(), ", self.full_dim =",self.full_dim)
+        real, imag = self.act( self.dense(real) ), self.act( self.dense(imag) )
+        real, imag = self.act( self.dense(real) ), self.act( self.dense(imag) )
+        real, imag = self.act( self.dense(real) ), self.act( self.dense(imag) )
+        real, imag = self.act( self.dense(real) ), self.act( self.dense(imag) )
 
+        y = self.decoder(real, imag)
+        y = y.squeeze(0)
+        return y
+
+    def forward_old(self, input_var):
+        y = self.encoder(input_var)
+
+        #y = self.proj(y)
+        #y = self.act(y)
+        #y = self.dropout(y)
         #middle = self.dense(x_ft)
         #middle = self.act(middle)  # nonlinear activation function
 
         # CNN version  works much more efficiently than fully-connected layers
-        x_ft = x_ft.unsqueeze(1)             # add one array dimension at index 1
-        middle = self.cnn(x_ft)                # added a new set of layer(s)
-        middle = middle.squeeze(1)       # remove extra array dimension at index 1
+        y = y.unsqueeze(1)             # add one array dimension at index 1
+        y = self.cnn(y)                # added a new set of layer(s)
+        y = y.squeeze(1)       # remove extra array dimension at index 1
+        #y = self.dropout(y)
 
-        wave_form = self.decoder(middle)
+        #y = self.deproj(y)
+        y = self.act(y)
+
+        #middle = self.filter(middle)
+        wave_form = self.decoder(y)
         return wave_form
 
 
-
+# my attempt at a Seq2Seq model.  TODO: Fix problem: Runs of memory.
 class Seq2Seq(nn.Module):
     # TODO: Try adding Attention
     def __init__(self, input_size=8192, hidden_size=2048):
@@ -174,4 +224,68 @@ class Seq2Seq(nn.Module):
         else:
             return result
 
+
+
+# visualize aspects of the model's internal state
+def model_viz(model, outfileprefix):
+    #print("model_viz:  ")
+
+    outfile = outfileprefix+'_modelviz.pdf'
+    n_modules = 0
+    for module in model.modules():
+        n_modules += 1
+
+    fignum = 1
+    with PdfPages(outfile) as pdf:
+        for m in model.modules():
+            if isinstance(m, nn.Linear):   # linear layers
+                tensor = m.weight.data.cpu().numpy()
+                mdescr = str(m)
+                #print("Linear module: tensor.shape = ",tensor.shape)
+                fig, ax1 = plt.subplots(1)
+                plt.title(mdescr)
+                ax1.imshow(tensor.squeeze())
+                ax1.axis('off')
+                ax1.set_xticklabels([])
+                ax1.set_yticklabels([])
+                pdf.savefig()
+                plt.close()
+                fignum += 1
+
+            if isinstance(m, nn.Conv2d):   # conv2d layers
+                tensor = m.weight.data.cpu().numpy()
+                mdescr = str(m)
+                # Using https://discuss.pytorch.org/t/understanding-deep-network-visualize-weights/2060/7
+                #print("Conv2D or Linear module: tensor.shape = ",tensor.shape)
+                num_batches = tensor.shape[0]
+                num_cols = 4 #tensor.shape[1]
+                num_rows = 1 #+ num_batches // num_cols
+                fig = plt.figure(figsize=(num_cols,num_rows*2))
+                plt.title(mdescr)
+                for i in range(num_batches):
+                    ax1 = fig.add_subplot(num_rows,num_cols,i+1)
+                    ax1.imshow(tensor[i,0])
+                    ax1.axis('off')
+                    ax1.set_xticklabels([])
+                    ax1.set_yticklabels([])
+                plt.subplots_adjust(wspace=0.1, hspace=0.1)
+                pdf.savefig()
+                plt.close()
+                fignum += 1
+
+            elif isinstance(m, nn.Conv1d) or isinstance(m, nn.ConvTranspose1d):
+                tensor = m.weight.data.cpu().numpy()
+                mdescr = str(m)
+                # Using https://discuss.pytorch.org/t/understanding-deep-network-visualize-weights/2060/7
+                #print("Conv1d module: tensor.shape = ",tensor.shape)
+                fig, ax1 = plt.subplots(1)
+                plt.title(mdescr)
+                ax1.imshow(tensor.squeeze())
+                ax1.axis('off')
+                ax1.set_xticklabels([])
+                ax1.set_yticklabels([])
+                pdf.savefig()
+                plt.close()
+                fignum += 1
+    return
 #  EOF

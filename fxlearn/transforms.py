@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 __author__ = 'S. Venkataramani, S.I. Mimilakis'
 __copyright__ = 'ECE Illinois, MacSeNet'
@@ -224,6 +225,11 @@ class FNNAnalysis(nn.Module):
             self.fnn_analysis_imag.weight.data.copy_(torch.from_numpy(f_matrix_imag))
 
     def forward(self, wave_form):
+        #print("self.sz = ",self.sz)
+        #print("wave_form.size() =",wave_form.size())
+        #real = self.fnn_analysis_real(wave_form)
+        #print("real.size() = ",real.size(),", self.half_N =",self.half_N)
+
         an_real = self.fnn_analysis_real(wave_form)[:, :, :self.half_N]
         an_imag = self.fnn_analysis_imag(wave_form)[:, :, :self.half_N]
 
@@ -281,8 +287,8 @@ class FNNSynthesis(nn.Module):
 
     def forward(self, real, imag):
 
-        real = torch.cat((real, Synthesis.flip(real[:, :, 1:-1].contiguous(), 2)), 2)
-        imag = torch.cat((imag, Synthesis.flip(-imag[:, :, 1:-1].contiguous(), 2)), 2)
+        real = torch.cat((real, FNNSynthesis.flip(real[:, :, 1:-1].contiguous(), 2)), 2)
+        imag = torch.cat((imag, FNNSynthesis.flip(-imag[:, :, 1:-1].contiguous(), 2)), 2)
 
         wave_form = self.tanh(self.fnn_synthesis_real(real) + self.fnn_synthesis_imag(imag))
         return wave_form

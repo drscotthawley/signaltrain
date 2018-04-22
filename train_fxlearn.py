@@ -1,68 +1,98 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
-__author__ = 'S.I. Mimilakis & S.H. Hawley'
-__copyright__ = 'MacSeNet'
+__author__ = 'Scott H. Hawley'
+__copyright__ = 'Scott H. Hawley'
 
-# imports
 import numpy as np
 import torch
 import argparse
-import os
-import fxlearn as fxl    # This is where I'm putting things...
+import fxlearn as fxl
 
-def train_model(model, optimizer, criterion, start_epoch = 0, max_epochs=100,
-    batch_size=100, sig_length=8192*20000, fs=44100.,
-    tol=1e-14, change_every=10000, save_every=10, plot_every=10):
 
-    input_var, target_var = fxl.utils.gen_data(sig_length)
+def train_model(model, optimizer, criterion, X_train, Y_train,
+    X_val=None, Y_val=None, losslogger=None,
+    start_epoch=0, max_epochs=100,
+    batch_size=100, sig_length=8192*100, fs=44100.,
+    tol=1e-14, change_every=10, save_every=100, plot_every=10):
+
+    if (losslogger is None):
+        losslogger = fxl.utils.LossLogger()
 
     for epoch_iter in range(max_epochs - start_epoch):
         epoch = start_epoch + epoch_iter
-        print('Epoch ', epoch,'/', max_epochs, sep="", end=":")
 
         # change the input dataset to encourage generality
-        if (epoch > 0) and (0 == epoch_iter % change_every):
-            input_var, target_var = fxl.utils.gen_data(sig_length)
+        if (epoch > start_epoch) and (0 == epoch_iter % change_every):
+            print("Preparing new data...")
+            X_train, Y_train = fxl.audio.gen_audio(sig_length, chunk_size=int(X_train.size()[-1]))
 
-        n_batches = 1#input_var.size()[0]
+        print('Epoch ', epoch,' /', max_epochs, sep="", end=":")
+
+        n_batches = 1#X_train.size()[0]
         for batch in range(n_batches):
             batch_index = batch * batch_size
 
             optimizer.zero_grad()
-            wave_form = model(input_var)   # run the neural network forward
-            loss = criterion(wave_form, target_var)
+            wave_form = model(X_train)   # run the neural network forward
+            loss = criterion(wave_form, Y_train)
 
-            loss_val = loss.data.cpu().numpy()[0]
-            fxl.utils.print_loss(loss_val)
-
-            if (epoch > start_epoch):
-                device = str(torch.cuda.current_device())
-                if (0 == epoch % save_every) or (epoch >= max_epochs-1):
-                    checkpoint_name = 'checkpoint'+device+'.pth.tar'
-                    print("Saving checkpoint in ",checkpoint_name)
-                    fxl.utils.save_checkpoint({'epoch': epoch + 1, 'state_dict': model.state_dict(),
-                        'optimizer' : optimizer.state_dict(),}, False, filename=checkpoint_name)
-                if (0 == epoch % plot_every):
-                    outfile = 'progress'+device+'.pdf'
-                    print("Saving progress report to ",outfile,": ",end="")
-                    fxl.utils.make_report(input_var, target_var, wave_form, outfile=outfile, epoch=epoch, device=device)
+            if (X_val is None):   # we'll print both losses later if we can
+                losslogger.update(epoch, loss, None)
 
             if loss.data.cpu().numpy() < tol:
                 break
 
+            # TODO: move this back once we're doing 'real' batches
+            if (n_batches > 1):
+                loss.backward(retain_graph=True)      # retain_graph=True needed for RNNs, it seems
+                optimizer.step()
+
+        #----- after full dataset run through (all batches),do various reporting & diagnostic things
+
+        if ((X_val is not None) and (Y_val is not None)):
+            Ypred_val = model(X_val)
+            vloss = criterion( Ypred_val, Y_val)
+            losslogger.update(epoch, loss, vloss)
+
+        if (epoch > start_epoch):
+            device = str(torch.cuda.current_device())
+            if (0 == epoch % save_every) or (epoch >= max_epochs-1):
+                checkpoint_name = 'checkpoint'+device+'.pth.tar'
+                print("Saving checkpoint in",checkpoint_name)
+                fxl.utils.save_checkpoint({'epoch': epoch + 1, 'state_dict': model.state_dict(),
+                                           'optimizer': optimizer.state_dict(),
+                                           'losslogger': losslogger,
+                                           }, filename=checkpoint_name)
+            if (0 == epoch % plot_every):
+                outfile = 'progress'+device
+                print("Saving progress report to ",outfile,'.*',sep="")
+                fxl.utils.make_report(X_train, Y_train, wave_form, losslogger, outfile=outfile, epoch=epoch)
+                fxl.models.model_viz(model,outfile)
+
+        # TODO: move this back up if
+        if (1 == n_batches):
             loss.backward(retain_graph=True)      # retain_graph=True needed for RNNs, it seems
             optimizer.step()
+
+        if loss.data.cpu().numpy() < tol:  # need this 2nd break to get out of main Epoch loop
+            break
 
     return model
 
 
-# One additional model evaluation on new 'test; data
-def eval_model(model, sig_length):
-    input_var, target_var = fxl.utils.gen_data(sig_length)
-    wave_form = model(input_var)    # run network forward
-    outfile = 'final.pdf'
-    print("Saving final Test evaluation report to",outfile,": ",end="")
-    fxl.utils.make_report(input_var, target_var, wave_form, outfile=outfile)
+# One additional model evaluation on Test or Val data
+def eval_model(model, sig_length, fs=44100., X=None, Y=None): # X=input, Y=target
+    print("\n\nEvaluating model: loss_num=",end="")
+    if (None == X):
+        X, Y = fxl.audio.gen_audio(sig_length)
+    Ypred = model(X)    # run network forward
+    loss = criterion(wave_form, Y)
+    loss_num = loss.data.cpu().numpy()[0]
+    print(loss_num)
+    device = str(torch.cuda.current_device())
+    outfile = 'final'+device
+    print("Saving final Test evaluation report to ",outfile,".*",sep="")
+    fxl.utils.make_report(X, Y, Ypred, loss_num, outfile=outfile)
     return
 
 
@@ -74,14 +104,16 @@ def main():
     torch.manual_seed(1)
     np.random.seed(1)
 
-
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='fxlearn')
     parser.add_argument('--epochs', default=10000, type=int, help="Number of iterations to train for")
-    parser.add_argument('--length', default=8192*2000, type=int, help="Length of audio signals")
+    parser.add_argument('--length', default=8192*4000, type=int, help="Length of audio signals")
+    parser.add_argument('--chunk', default=4096, type=int, help="Length of each 'chunk' or window that input signal is chopped up into")
+    parser.add_argument('--plot', default=100, type=int, help="Plot report every this many epochs")
+
     parser.add_argument('--fs', default=44100, type=int, help="Sample rate in Hertz")
     parser.add_argument('--device', default=0, type=int, help="CUDA device to use (e.g. 0 or 1)")
-    parser.add_argument('--change', default=10000, type=int, help="Changed data every this many epochs")
+    parser.add_argument('--change', default=50, type=int, help="Changed data every this many epochs")
 
     parser.add_argument('--model', default='spectral', type=str,
                     help="Model type: 'spectral' (default) or 'seq2seq'")
@@ -108,45 +140,43 @@ def main():
     if ('seq2seq' == args.model):
         model = fxl.models.Seq2Seq()
     else:
-        model = fxl.models.SpecEncDec()
+        model = fxl.models.SpecEncDec(ft_size=args.chunk)
+    model = torch.nn.DataParallel(model)       # run on multiple GPUs if possible
+
+    losslogger = fxl.utils.LossLogger()
     criterion = torch.nn.MSELoss()
-    # on next line, setting eps as per pytorch Issue #1767
-    optimizer = torch.optim.Adam([ {'params': model.parameters()}], lr = 0.0005, eps=1e-7)#,  amsgrad=True)#, weight_decay=0.01)
+    optimizer = torch.optim.Adam([ {'params': model.parameters()}], lr = 0.001, eps=1e-7)#,  amsgrad=True)
 
-
-    #---------------------
-    # Checkpoint recovery
-    #---------------------
-    if os.path.isfile(args.resume):     # checkpoint recovery
-        print("=> loading checkpoint '{}'".format(args.resume))
-        checkpoint = torch.load(args.resume)
-        start_epoch = checkpoint['epoch']
-        #best_prec1 = checkpoint['best_prec1']
-        model.load_state_dict(checkpoint['state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.resume, checkpoint['epoch']))
-    else:
-        print("=> no checkpoint found at '{}'".format(args.resume))
-        start_epoch = 0
+    #-------------------------------------------------
+    # Checkpoint recovery (if possible and requested)
+    #-------------------------------------------------
+    model, optimizer, start_epoch, losslogger = fxl.utils.load_checkpoint(model, optimizer, losslogger, filename=args.resume)
 
     #------------------------------------------------------------------
     # Once checkpoints are loaded (or not), CUDA-ify model if possible
     #------------------------------------------------------------------
     if torch.has_cudnn:
         model.cuda()
-    model = torch.nn.DataParallel(model)
+
+    #------------------------------------------
+    # Set up Training and Validation datasets
+    #------------------------------------------
+    print("Peparing Training data...")
+    X_train, Y_train = fxl.audio.gen_audio(sig_length, chunk_size=args.chunk)
+    print("Peparing Validation data...")
+    X_val, Y_val = fxl.audio.gen_audio(int(sig_length/8), chunk_size=args.chunk)
 
     #---------------
     # Training Loop
     #---------------
-    model = train_model(model, optimizer, criterion, start_epoch=start_epoch, max_epochs=args.epochs,
-        fs=fs, sig_length=sig_length, change_every=args.change)
+    model = train_model(model, optimizer, criterion, X_train, Y_train, X_val=X_val, Y_val=Y_val,
+        start_epoch=start_epoch, max_epochs=args.epochs, losslogger=losslogger,
+        fs=fs, sig_length=sig_length, change_every=args.change, plot_every=args.plot)
 
     #--------------------------------
     # Evaluate model on Test dataset
     #--------------------------------
-    eval_model(model, sig_length, fs)
+    eval_model(model, sig_length, fs=fs)
     return
 
 if __name__ == '__main__':
