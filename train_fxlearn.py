@@ -81,18 +81,19 @@ def train_model(model, optimizer, criterion, X_train, Y_train,
 
 
 # One additional model evaluation on Test or Val data
-def eval_model(model, sig_length, fs=44100., X=None, Y=None): # X=input, Y=target
+def eval_model(model, criterion, losslogger, sig_length, chunk_size, fs=44100., X=None, Y=None): # X=input, Y=target
+
     print("\n\nEvaluating model: loss_num=",end="")
     if (None == X):
-        X, Y = fxl.audio.gen_audio(sig_length)
+        X, Y = fxl.audio.gen_audio(sig_length, chunk_size=chunk_size)
     Ypred = model(X)    # run network forward
-    loss = criterion(wave_form, Y)
+    loss = criterion(Ypred, Y)
     loss_num = loss.data.cpu().numpy()[0]
     print(loss_num)
     device = str(torch.cuda.current_device())
     outfile = 'final'+device
     print("Saving final Test evaluation report to ",outfile,".*",sep="")
-    fxl.utils.make_report(X, Y, Ypred, loss_num, outfile=outfile)
+    fxl.utils.make_report(X, Y, Ypred, losslogger, outfile=outfile)
     return
 
 
@@ -176,7 +177,7 @@ def main():
     #--------------------------------
     # Evaluate model on Test dataset
     #--------------------------------
-    eval_model(model, sig_length, fs=fs)
+    eval_model(model, criterion, losslogger,  sig_length, chunk_size=args.chunk, fs=fs)
     return
 
 if __name__ == '__main__':
