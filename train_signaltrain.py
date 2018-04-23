@@ -6,7 +6,7 @@ __copyright__ = 'Scott H. Hawley'
 import numpy as np
 import torch
 import argparse
-import fxlearn as fxl
+import signaltrain as st
 
 
 def train_model(model, optimizer, criterion, X_train, Y_train,
@@ -16,7 +16,7 @@ def train_model(model, optimizer, criterion, X_train, Y_train,
     tol=1e-14, change_every=10, save_every=100, plot_every=10):
 
     if (losslogger is None):
-        losslogger = fxl.utils.LossLogger()
+        losslogger = st.utils.LossLogger()
 
     for epoch_iter in range(max_epochs - start_epoch):
         epoch = start_epoch + epoch_iter
@@ -24,7 +24,7 @@ def train_model(model, optimizer, criterion, X_train, Y_train,
         # change the input dataset to encourage generality
         if (epoch > start_epoch) and (0 == epoch_iter % change_every):
             print("Preparing new data...")
-            X_train, Y_train = fxl.audio.gen_audio(sig_length, chunk_size=int(X_train.size()[-1]))
+            X_train, Y_train = st.audio.gen_audio(sig_length, chunk_size=int(X_train.size()[-1]))
 
         print('Epoch ', epoch,' /', max_epochs, sep="", end=":")
 
@@ -59,15 +59,15 @@ def train_model(model, optimizer, criterion, X_train, Y_train,
             if (0 == epoch % save_every) or (epoch >= max_epochs-1):
                 checkpoint_name = 'checkpoint'+device+'.pth.tar'
                 print("Saving checkpoint in",checkpoint_name)
-                fxl.utils.save_checkpoint({'epoch': epoch + 1, 'state_dict': model.state_dict(),
+                st.utils.save_checkpoint({'epoch': epoch + 1, 'state_dict': model.state_dict(),
                                            'optimizer': optimizer.state_dict(),
                                            'losslogger': losslogger,
                                            }, filename=checkpoint_name)
             if (0 == epoch % plot_every):
                 outfile = 'progress'+device
                 print("Saving progress report to ",outfile,'.*',sep="")
-                fxl.utils.make_report(X_train, Y_train, wave_form, losslogger, outfile=outfile, epoch=epoch)
-                fxl.models.model_viz(model,outfile)
+                st.utils.make_report(X_train, Y_train, wave_form, losslogger, outfile=outfile, epoch=epoch)
+                st.models.model_viz(model,outfile)
 
         # TODO: move this back up if
         if (1 == n_batches):
@@ -85,7 +85,7 @@ def eval_model(model, criterion, losslogger, sig_length, chunk_size, fs=44100., 
 
     print("\n\nEvaluating model: loss_num=",end="")
     if (None == X):
-        X, Y = fxl.audio.gen_audio(sig_length, chunk_size=chunk_size)
+        X, Y = st.audio.gen_audio(sig_length, chunk_size=chunk_size)
     Ypred = model(X)    # run network forward
     loss = criterion(Ypred, Y)
     loss_num = loss.data.cpu().numpy()[0]
@@ -93,7 +93,7 @@ def eval_model(model, criterion, losslogger, sig_length, chunk_size, fs=44100., 
     device = str(torch.cuda.current_device())
     outfile = 'final'+device
     print("Saving final Test evaluation report to ",outfile,".*",sep="")
-    fxl.utils.make_report(X, Y, Ypred, losslogger, outfile=outfile)
+    st.utils.make_report(X, Y, Ypred, losslogger, outfile=outfile)
     return
 
 
@@ -106,7 +106,7 @@ def main():
     np.random.seed(1)
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='fxlearn')
+    parser = argparse.ArgumentParser(description='trains SignalTrain effects mapper')
     parser.add_argument('--epochs', default=10000, type=int, help="Number of iterations to train for")
     parser.add_argument('--length', default=8192*4000, type=int, help="Length of audio signals")
     parser.add_argument('--chunk', default=4096, type=int, help="Length of each 'chunk' or window that input signal is chopped up into")
@@ -139,19 +139,19 @@ def main():
     # Set up model and training criteria
     #------------------------------------
     if ('seq2seq' == args.model):
-        model = fxl.models.Seq2Seq()
+        model = st.models.Seq2Seq()
     else:
-        model = fxl.models.SpecEncDec(ft_size=args.chunk)
+        model = st.models.SpecEncDec(ft_size=args.chunk)
     model = torch.nn.DataParallel(model)       # run on multiple GPUs if possible
 
-    losslogger = fxl.utils.LossLogger()
+    losslogger = st.utils.LossLogger()
     criterion = torch.nn.MSELoss()
     optimizer = torch.optim.Adam([ {'params': model.parameters()}], lr = 0.001, eps=1e-7)#,  amsgrad=True)
 
     #-------------------------------------------------
     # Checkpoint recovery (if possible and requested)
     #-------------------------------------------------
-    model, optimizer, start_epoch, losslogger = fxl.utils.load_checkpoint(model, optimizer, losslogger, filename=args.resume)
+    model, optimizer, start_epoch, losslogger = st.utils.load_checkpoint(model, optimizer, losslogger, filename=args.resume)
 
     #------------------------------------------------------------------
     # Once checkpoints are loaded (or not), CUDA-ify model if possible
@@ -163,9 +163,9 @@ def main():
     # Set up Training and Validation datasets
     #------------------------------------------
     print("Peparing Training data...")
-    X_train, Y_train = fxl.audio.gen_audio(sig_length, chunk_size=args.chunk)
+    X_train, Y_train = st.audio.gen_audio(sig_length, chunk_size=args.chunk)
     print("Peparing Validation data...")
-    X_val, Y_val = fxl.audio.gen_audio(int(sig_length/8), chunk_size=args.chunk)
+    X_val, Y_val = st.audio.gen_audio(int(sig_length/8), chunk_size=args.chunk)
 
     #---------------
     # Training Loop
