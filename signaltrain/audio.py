@@ -37,19 +37,21 @@ def gen_pluck(length, t=None, amp=None, freq=None, decay=None, t0=0.0):
     return pluck
 
 def ta_oneproc(input_sigs, target_sigs, chunk_size, event_len, num_events, chunk_index):
-    sig_length = input_sigs.shape[1]
+    sig_length = chunk_size
+
     base_event = gen_pluck( int(event_len*1.5))
     target_sigs[chunk_index, 0: base_event.size()[-1]] = base_event
     input_sigs[chunk_index, 0: base_event.size()[-1]] = base_event
 
     for eventnum in range(num_events):
         event = gen_pluck(event_len)
-        # goal: space them evenly
+
+        # target: space events evenly
         itar_bgn = int(eventnum*event_len) + int(chunk_size/2)
         itar_end = min(itar_bgn + event_len, sig_length-1)
         target_sigs[chunk_index, itar_bgn:itar_end] = event[0 : itar_end - itar_bgn]
 
-        # randomly shift it for input
+        # input: randomly shift it for input
         if (eventnum > -1):
             iinp_bgn = max(0, int(itar_bgn + (event_len/6)* (2*np.random.random()-1) ) )  # forward or backward
         else:
@@ -60,9 +62,9 @@ def ta_oneproc(input_sigs, target_sigs, chunk_size, event_len, num_events, chunk
     return # note we don't have to return arrays because ThreadPool shares memory
 
 def gen_timealign_pairs(chunk_size, num_chunks, num_events=1, parallel=True):
-    input_sigs = 0.1*torch.zeros((num_chunks, chunk_size))
+    input_sigs = torch.zeros((num_chunks, chunk_size))
     target_sigs = input_sigs.clone()#  0.1*torch.randn((num_chunks, chunk_size))
-    sig_length = input_sigs.shape[1]
+    sig_length = chunk_size
     event_len = int( sig_length / (num_events+1) )
     chunk_indices = tuple( range(num_chunks) )
 
@@ -250,20 +252,24 @@ def inv_chopnstack(stack, orig_len=None):
         return stack.reshape(-1)[0:orig_len]
 
 
-def gen_audio(sig_length, chunk_size=8192, effect='ta'):
+def gen_audio(sig_length, chunk_size=8192, effect='ta', input_var=None, target_var=None):
     my_dtype = np.float32
 
-    num_chunks = int(sig_length / chunk_size)
-    if ('ps' == effect):
+    # Free up pytorch tensor memory usage before generating new data 
+    if (input_var is not None) and (target_var is not None):
+        del input_var, target_var
 
+    num_chunks = int(sig_length / chunk_size)
+    if ('ps' == effect):    # pitch shift
         fs = 44100.
         num_waves = 20
         amp_fac = 0.43
         freq_fac = 0.31
         input_stack, target_stack = gen_pitch_shifted_pairs(chunk_size, fs, amp_fac, freq_fac, num_waves, num_chunks)
-    elif ('ta' == effect):
+
+    elif ('ta' == effect):  # time align
         input_stack, target_stack = gen_timealign_pairs(chunk_size, num_chunks)
-    else:
+    else:                   # other effects, where target can be generated from input instead of both together
         # Generate input signal
         clips_per_chunk = 2
         clip_size = int( chunk_size / clips_per_chunk)

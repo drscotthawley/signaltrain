@@ -11,20 +11,20 @@ import signaltrain as st
 
 def train_model(model, optimizer, criterion, X_train, Y_train,
     X_val=None, Y_val=None, losslogger=None,
-    start_epoch=0, max_epochs=100,
+    start_epoch=1, max_epochs=100,
     batch_size=100, sig_length=8192*100, fs=44100.,
-    tol=1e-14, change_every=10, save_every=100, plot_every=10):
+    tol=1e-14, change_every=10, save_every=100, plot_every=10, retain_graph=False):
 
     if (losslogger is None):
         losslogger = st.utils.LossLogger()
 
-    for epoch_iter in range(max_epochs - start_epoch):
+    for epoch_iter in range(1, 1 + max_epochs - start_epoch): # start w/ 1 so can plot log/log scale
         epoch = start_epoch + epoch_iter
 
         # change the input dataset to encourage generality
         if (epoch > start_epoch) and (0 == epoch_iter % change_every):
             print("Preparing new data...")
-            X_train, Y_train = st.audio.gen_audio(sig_length, chunk_size=int(X_train.size()[-1]))
+            X_train, Y_train = st.audio.gen_audio(sig_length, chunk_size=int(X_train.size()[-1]), input_var=X_train, target_var=Y_train)
 
         print('Epoch ', epoch,' /', max_epochs, sep="", end=":")
 
@@ -44,7 +44,7 @@ def train_model(model, optimizer, criterion, X_train, Y_train,
 
             # TODO: move this back once we're doing 'real' batches
             if (n_batches > 1):
-                loss.backward(retain_graph=True)      # retain_graph=True needed for RNNs, it seems
+                loss.backward(retain_graph=retain_graph)
                 optimizer.step()
 
         #----- after full dataset run through (all batches),do various reporting & diagnostic things
@@ -62,7 +62,7 @@ def train_model(model, optimizer, criterion, X_train, Y_train,
                 st.utils.save_checkpoint({'epoch': epoch + 1, 'state_dict': model.state_dict(),
                                            'optimizer': optimizer.state_dict(),
                                            'losslogger': losslogger,
-                                           }, filename=checkpoint_name)
+                                           }, filename=checkpoint_name, is_best=losslogger.is_best )
             if (0 == epoch % plot_every):
                 outfile = 'progress'+device
                 print("Saving progress report to ",outfile,'.*',sep="")
@@ -71,7 +71,7 @@ def train_model(model, optimizer, criterion, X_train, Y_train,
 
         # TODO: move this back up if
         if (1 == n_batches):
-            loss.backward(retain_graph=True)      # retain_graph=True needed for RNNs, it seems
+            loss.backward(retain_graph=False)#retain_graph)
             optimizer.step()
 
         if loss.data.cpu().numpy() < tol:  # need this 2nd break to get out of main Epoch loop
@@ -108,16 +108,18 @@ def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='trains SignalTrain effects mapper')
     parser.add_argument('--epochs', default=10000, type=int, help="Number of iterations to train for")
-    parser.add_argument('--length', default=8192*4000, type=int, help="Length of audio signals")
-    parser.add_argument('--chunk', default=4096, type=int, help="Length of each 'chunk' or window that input signal is chopped up into")
+    chunk_max = 15000     # roughly the maximum model size that will fit in memory on Titan X Pascal GPU
+                          # if you immediately get OOM errors, decrease chunk_max
+    parser.add_argument('--length', default=chunk_max*6000, type=int, help="Length of each audio signal (then cut up into chunks)")
+    parser.add_argument('--chunk', default=chunk_max, type=int, help="Length of each 'chunk' or window that input signal is chopped up into")
     parser.add_argument('--plot', default=100, type=int, help="Plot report every this many epochs")
 
     parser.add_argument('--fs', default=44100, type=int, help="Sample rate in Hertz")
     parser.add_argument('--device', default=0, type=int, help="CUDA device to use (e.g. 0 or 1)")
-    parser.add_argument('--change', default=50, type=int, help="Changed data every this many epochs")
+    parser.add_argument('--change', default=20, type=int, help="Changed data every this many epochs")
 
-    parser.add_argument('--model', default='spectral', type=str,
-                    help="Model type: 'spectral' (default) or 'seq2seq'")
+    parser.add_argument('--model', default='specsg', type=str,
+                    help="Model type: 'specsg' (default), 'spectral' or 'seq2seq'")
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
     args = parser.parse_args()
@@ -138,8 +140,12 @@ def main():
     #------------------------------------
     # Set up model and training criteria
     #------------------------------------
+    retain_graph = False  # retain_graph only needed for RNN models. It's a memory hog
     if ('seq2seq' == args.model):
         model = st.models.Seq2Seq()
+        retain_graph=True
+    elif ('specsg' == args.model):
+        model = st.models.SpecShrinkGrow(chunk_size=args.chunk)
     else:
         model = st.models.SpecEncDec(ft_size=args.chunk)
     model = torch.nn.DataParallel(model)       # run on multiple GPUs if possible
@@ -165,14 +171,14 @@ def main():
     print("Peparing Training data...")
     X_train, Y_train = st.audio.gen_audio(sig_length, chunk_size=args.chunk)
     print("Peparing Validation data...")
-    X_val, Y_val = st.audio.gen_audio(int(sig_length/8), chunk_size=args.chunk)
+    X_val, Y_val = st.audio.gen_audio(int(sig_length/5), chunk_size=args.chunk)
 
     #---------------
     # Training Loop
     #---------------
     model = train_model(model, optimizer, criterion, X_train, Y_train, X_val=X_val, Y_val=Y_val,
         start_epoch=start_epoch, max_epochs=args.epochs, losslogger=losslogger,
-        fs=fs, sig_length=sig_length, change_every=args.change, plot_every=args.plot)
+        fs=fs, sig_length=sig_length, change_every=args.change, plot_every=args.plot, retain_graph=retain_graph)
 
     #--------------------------------
     # Evaluate model on Test dataset

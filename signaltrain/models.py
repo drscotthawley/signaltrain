@@ -130,6 +130,72 @@ class Gaussian(nn.Module):
 class SpecEncDec(nn.Module):
     def __init__(self, ft_size=1024):
         super(SpecEncDec, self).__init__()
+        self.encoder = front_end.FNNAnalysis(ft_size=ft_size)   # gives matrix mult. size mismatches
+        self.decoder = front_end.FNNSynthesis(ft_size=ft_size)
+
+        self.full_dim = int(ft_size/2 +1)
+        self.dense = nn.Linear(self.full_dim, self.full_dim)
+
+        self.act = nn.LeakyReLU()   # Tried ReLU, ELU, SELU; Leaky works best.  SELU yields instability
+
+    def forward(self, input_var):
+        y = input_var.unsqueeze(0)   # hack to deal with batch size of 1 right now; TODO: remove this
+        real, imag = self.encoder(y)
+        real, imag = self.act( self.dense(real) ), self.act( self.dense(imag) )
+        real, imag = self.act( self.dense(real) ), self.act( self.dense(imag) )
+        real, imag = self.act( self.dense(real) ), self.act( self.dense(imag) )
+        real, imag = self.act( self.dense(real) ), self.act( self.dense(imag) )
+        y = self.decoder(real, imag)
+        y = y.squeeze(0)
+        return y
+
+
+class SpecShrinkGrow(nn.Module):  # spectral bottleneck encoder
+    def __init__(self, chunk_size=1024):
+        super(SpecShrinkGrow, self).__init__()
+
+        ft_size = int(chunk_size /3)  # previously used ft_size = chunk_size, but that was limiting GPU memory usage
+
+        # these shrink & grow routines are just to try to decrease encoder-decoder GPU memory usage
+        self.front_shrink = nn.Linear(chunk_size, ft_size, bias=False)
+        self.back_grow    = nn.Linear(ft_size, chunk_size, bias=False)
+
+        # the "FFT" routines
+        self.encoder = front_end.FNNAnalysis(ft_size=ft_size)   # gives matrix mult. size mismatches
+        self.decoder = front_end.FNNSynthesis(ft_size=ft_size, random_init=True)  #  random_init=True gives me better Val scores
+
+        # define some more size variables for shrinking & growing sizes in between encoder & decoder
+        full_dim  = int(ft_size/2 +1)   # this is the size of the output from the FNNAnalysis routine
+        ratio = 3   # Reduction ratio. Also tried 2; 3 works about as well as 2.  4 seems to be too much
+        med_dim   = int(full_dim / ratio)
+        small_dim = int(med_dim / ratio)
+
+        self.shrink  = nn.Linear(full_dim,  med_dim, bias=False)
+        self.shrink2 = nn.Linear(med_dim,   small_dim, bias=False)
+        #self.dense = nn.Linear(self.small_dim, self.small_dim, bias=False)  # not needed
+        self.grow2   = nn.Linear(small_dim, med_dim, bias=False)
+        self.grow    = nn.Linear(med_dim,   full_dim, bias=False)
+        self.act     = nn.LeakyReLU()   # Tried ReLU, ELU, SELU; Leaky seems to work best.  SELU yields instability
+
+    def forward(self, input_var):
+        y = input_var
+        y = self.front_shrink(y)
+        y = self.act(y)
+        y = y.unsqueeze(0)   # hack to deal with batch size of 1 right now; TODO: remove this
+        real, imag = self.encoder(y)
+        real, imag = self.act( self.shrink(real) ),  self.act( self.shrink(imag) )
+        real, imag = self.act( self.shrink2(real) ), self.act( self.shrink2(imag) )
+        real, imag = self.act( self.grow2(real) ),   self.act( self.grow2(imag) )
+        real, imag = self.act( self.grow(real) ),    self.act( self.grow(imag) )
+        y = self.decoder(real, imag)
+        y = y.squeeze(0)
+        y = self.back_grow(y)
+        return y
+
+
+class SpecEncDec_old(nn.Module):  # old version; unused
+    def __init__(self, ft_size=1024):          # ft_size must = 'chunk_size' elsewhere in code
+        super(SpecEncDec_old, self).__init__()
         self.ft_size = ft_size
         self.w_size = self.ft_size * 2
         self.hop_size = self.ft_size
@@ -154,21 +220,7 @@ class SpecEncDec(nn.Module):
         #self.filter = LowPassLayer(self.ft_size)
         #self.dropout = torch.nn.Dropout2d(p=0.1)
 
-    # Here's where we run the network forward (PyTorch takes care of backward)
     def forward(self, input_var):
-        y = input_var.unsqueeze(0)
-        real, imag = self.encoder(y)
-        #print("real.size()  =",real.size(),", imag.size() =",imag.size(), ", self.full_dim =",self.full_dim)
-        real, imag = self.act( self.dense(real) ), self.act( self.dense(imag) )
-        real, imag = self.act( self.dense(real) ), self.act( self.dense(imag) )
-        real, imag = self.act( self.dense(real) ), self.act( self.dense(imag) )
-        real, imag = self.act( self.dense(real) ), self.act( self.dense(imag) )
-
-        y = self.decoder(real, imag)
-        y = y.squeeze(0)
-        return y
-
-    def forward_old(self, input_var):
         y = self.encoder(input_var)
 
         #y = self.proj(y)

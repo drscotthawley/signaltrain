@@ -17,27 +17,36 @@ class LossLogger():
         self.loss_hist = []
         self.epoch_hist = []
         self.vloss_hist = []
+        self.best_vloss = 999.9
+        self.is_best = False
 
     def print_loss(self, loss_num, logy=True, vloss_num=None):
         if (logy):
-            term_width = 200
+            term_width = 180
             logval = np.log10(loss_num)
-            print(' loss = {:10.5e}'.format(loss_num) ,  ' '*int(term_width + 30*logval)+'*', end="")
+            print(' loss: {:10.5e}'.format(loss_num) ,  ' '*int(term_width + 30*logval)+'*', end="")
         else:
             term_width = 100
-            print(' loss = {:10.5e}'.format(loss_num) ,  ' '*int(loss_num/1*term_width)+'*',end="")
+            print(' loss: {:10.5e}'.format(loss_num) ,  ' '*int(loss_num/1*term_width)+'*',end="")
         if (vloss_num is not None):
-            print('  val = {:10.5e}'.format(vloss_num))
+            print('  val_loss: {:10.5e}'.format(vloss_num))
 
     def update(self, epoch, loss, vloss):
         loss_num = loss.data.cpu().numpy()[0]
         self.loss_hist.append([epoch, loss_num])
         if (vloss is not None):
             vloss_num = vloss.data.cpu().numpy()[0]
+            if (vloss_num < self.best_vloss):
+                self.best_vloss = vloss_num
+                self.is_best = True
+            else:
+                self.is_best = False
+
             self.vloss_hist.append([epoch, vloss_num])
         else:
             vloss_num = None
         self.print_loss(loss_num, vloss_num=vloss_num)
+
 
 
 def save_checkpoint(state, filename='checkpoint.pth.tar', is_best=False):
@@ -45,7 +54,9 @@ def save_checkpoint(state, filename='checkpoint.pth.tar', is_best=False):
     #    state = {'epoch': epoch + 1, 'state_dict': model.state_dict(),'optimizer': optimizer.state_dict(),}
     torch.save(state, filename)
     if is_best:
-        shutil.copyfile(filename, 'model_best.pth.tar')
+        bestname = 'model_best.pth.tar'
+        print("Best val_loss so far!   Copying checkpoint to",bestname)
+        shutil.copyfile(filename, bestname)
     return
 
 def load_checkpoint(model, optimizer, losslogger, filename='checkpoint.pth.tar'):
@@ -83,11 +94,12 @@ def make_report(input_var, target_var, wave_form, loss_log, outfile=None, epoch=
     # top panel: loss history
     lhist = np.array(loss_log.loss_hist)
     vlhist = np.array(loss_log.vloss_hist)
-    panels[0].semilogy(lhist[:,0], lhist[:,1], label='Train')
-    panels[0].semilogy(vlhist[:,0], vlhist[:,1], label='Val')
+    panels[0].loglog(lhist[:,0], lhist[:,1], label='Train')
+    panels[0].loglog(vlhist[:,0], vlhist[:,1], label='Val')
     panels[0].set_ylabel('Loss')
     panels[0].set_xlabel('Epoch')
-    panels[0].legend()
+    panels[0].legend(loc=1)
+    panels[0].set_xlim(left=100)  # ignore the 1st 100 epochs (better when plotting with loglog scale)
 
     # middle panels: sample function(s)
     for example in range(num_examples):
@@ -106,7 +118,7 @@ def make_report(input_var, target_var, wave_form, loss_log, outfile=None, epoch=
         if (None != epoch):
             outstr += ', Epoch = '+str(epoch)
         panels[p].text(0, 0.85*ampmax, outstr )
-        panels[p].legend()
+        panels[p].legend(loc=1)
 
     # panels[3]: difference
     diffval = wf - tar
