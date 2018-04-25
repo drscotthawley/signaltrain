@@ -1,6 +1,6 @@
 ![image1](../../images/TimeAlignPic1_many_plusminus.png)
-TimeAlignPic2_single_random_noisered.png	
-TimeAlignPic2_single_random_silence.png	
-TimeAlign_generatemissing.png	added 
-TimeAlign_generatemissing2.png	
-TimeAlignanotherexample.png
+![image1](TimeAlignPic2_single_random_noisered.png)
+![image1](TimeAlignPic2_single_random_silence.png)
+![image1](TimeAlign_generatemissing.png)
+![image1](TimeAlign_generatemissing2.png)	
+![image1](TimeAlignanotherexample.png)
