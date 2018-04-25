@@ -21,6 +21,12 @@ Obviously this is a function of how it was trained.  If it were trained on a dat
 Current maximum length I can get is 10500 samples, or around 340ms at 44.1Hz.  This is sufficient for most drum samples.  
 
 
+## Skip connections:
+
+Added skip connections; seems to have reached the same level of error as before, only gets there faster:
+![image](loss_skips.png)
+
+
 Future work:
 
 - Read in actual audio samples of drums
