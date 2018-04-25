@@ -1,3 +1,4 @@
+![images/stlogo.png](images/stlogo.png)
 # SignalTrain
 
 Learning audio effects with neural networks
