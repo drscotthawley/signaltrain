@@ -12,4 +12,5 @@ where c_1 and c_2 are constant coefficients, e.g. c_1= 0.37 and c_2 = 0.43,
 
 ...the system is able to learn the mapping X->Y for sets of X it hasn't seen before. 
 
-But this is not true pitch-shifting.  I'd hope to make use of VST host [Renderman](https://github.com/fedden/RenderMan) if it ever gets updated from Python 2.7 to 3.5.
+But this is not true pitch-shifting.  Now that VST host [Renderman](https://github.com/fedden/RenderMan) has been [patched](https://github.com/fedden/RenderMan/pull/8) to work with Python 3.6, it's just a matter of trying it out!
+
