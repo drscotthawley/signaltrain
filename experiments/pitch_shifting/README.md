@@ -1,0 +1,3 @@
+Generating a set of random tones...
+
+X = ![img](https://www.codecogs.com/eqnedit.php?latex={{\sum_i}^N}A_i\sin({f_i}t))
