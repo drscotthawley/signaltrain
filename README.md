@@ -24,12 +24,11 @@ docs/                   Not much here at the moment
 experiments/    Where I do various runs and report on them
 ```
 
-### Extra Utilities:
-- Leon Fedden's [RenderMan](https://github.com/fedden/RenderMan) VST host was just updated to Python 3.6.  I have yet to try it out. (A Python VST host is something I've wanted for this project for a long time!)
+### TODO:
+- More effects! Leon Fedden's [RenderMan](https://github.com/fedden/RenderMan) VST host was just updated to Python 3.6.  I have yet to try it out. (A Python VST host is something I've wanted for this project for a long time!)
+- Try mu-law companding to see if it improves SNR
+- A wavenet architecture? 
 
-
-### Disclaimer:
-Code is still highly experimental. Could use more 'real' comments, and fewer commented-out lines.
 
 #### History:
 Previously this repo was named "fxlearn".  Revised name "SignalTrain" suggested by [Rex Paul Schnelle](https://rexmusic.us/).
