@@ -32,8 +32,7 @@ experiments/    Where I do various runs and report on them
 * [ ]  Try mu-law companding to see if it improves SNR
 * [ ]  Add parameterized controls, e.g. by concatenating in the middle of the network. 
 * [ ]  A wavenet architecture? 
-* [ ]  Try replacing MSE loss with a classifier and turn this into a GAN? Slide I made describing this idea:
-![PutaGANonIt image](images/PutaGANonIt.png)
+* [ ]  Try replacing MSE loss with an audio classifier and turn this into a GAN? Currently writing up a [blog post](https://github.com/drscotthawley/drscotthawley.github.io/blob/master/_drafts/Put-A-GAN-On-It.md) about this, in the image domain. 
 
 
 #### History:
