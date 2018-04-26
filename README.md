@@ -32,6 +32,8 @@ experiments/    Where I do various runs and report on them
 * [ ]  Try mu-law companding to see if it improves SNR
 * [ ]  Add parameterized controls, e.g. by concatenating in the middle of the network. 
 * [ ]  A wavenet architecture? 
+* [ ]  Try replacing MSE loss with a classifier and turn this into a GAN? Slide from blog post I'm writing:
+![PutaGANonIt image](images/PutaGANonIt.jpg)
 
 
 #### History:
