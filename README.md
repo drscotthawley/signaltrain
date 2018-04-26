@@ -32,7 +32,7 @@ experiments/    Where I do various runs and report on them
 * [ ]  Try mu-law companding to see if it improves SNR
 * [ ]  Add parameterized controls, e.g. by concatenating in the middle of the network. 
 * [ ]  A wavenet architecture? 
-* [ ]  Try replacing MSE loss with an audio classifier and turn this into a GAN? Currently writing up a [blog post](https://github.com/drscotthawley/drscotthawley.github.io/blob/master/_drafts/Put-A-GAN-On-It.md) about this, in the image domain. 
+* [ ]  Try replacing MSE loss with an audio classifier and turn this into a GAN? Working on a [blog post](https://github.com/drscotthawley/drscotthawley.github.io/blob/master/_drafts/Put-A-GAN-On-It.md) about this, in the image domain. Problem will be avoiding gradient saturation. ([Jensen-Shannon divergence](https://en.wikipedia.org/wiki/Jensen%E2%80%93Shannon_divergence) seems to be a favorite to help with this.)
 
 
 #### History:
