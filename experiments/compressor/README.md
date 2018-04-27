@@ -5,7 +5,10 @@
  
  ![comp_image](../../images/progress0_comp_skips.png) 
  
- The blip in the loss history is where the run was interrupted & restarted.
+ Notes on this graph:
+ 
+ - The blip in the loss history is where the run was interrupted & restarted.
+ - Each epoch takes about 1 second to execute. This gives you a rough idea of the time involved in training. 
  
  More work is needed. 
  
