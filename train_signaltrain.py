@@ -111,7 +111,7 @@ def main():
     chunk_max = 15000     # roughly the maximum model size that will fit in memory on Titan X Pascal GPU
                           # if you immediately get OOM errors, decrease chunk_max
     parser.add_argument('--chunk', default=chunk_max, type=int, help="Length of each 'chunk' or window that input signal is chopped up into")
-    parser.add_argument('--length', default=chunk_max*6000, type=int, help="Length of each audio signal (then cut up into chunks)")
+    parser.add_argument('--length', default=chunk_max*10000, type=int, help="Length of each audio signal (then cut up into chunks)")
 
 
     parser.add_argument('--fs', default=44100, type=int, help="Sample rate in Hertz")
