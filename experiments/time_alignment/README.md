@@ -36,7 +36,7 @@ Current maximum length I could get is 10500 samples, or around 230ms at 44.1Hz. 
 Added skip connections to the model; seems to have reached the same level of error as before, only gets there faster:
 ![image](loss_skips.png)
 
-The best results (blue line above) were actually obtained by only using the "larger" 2 of the 3 skip connections I added.  The skip which spanned the "tiniest" part of the network didn't help much, but was also responsible for some high frequency noise.  Not including that skip helped reduced the noise (in the output waveforms, not shown).  I speculate that this skip was actually hindering the bottleneck-ing process of representation-learning, by providing a bypass. 
+The best results (blue line above) were actually obtained by only using the "larger" 2 of the 3 skip connections I added.  The skip which spanned the "tiniest" part of the network didn't help much, but was also responsible for some high frequency noise (in the output waveforms, not shown).  Not including that skip helped reduced the noise.  I speculate that this skip was actually hindering the bottleneck-ing process of representation-learning, by providing a bypass. 
 
 ## Adding `strength` 'knob'
 
