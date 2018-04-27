@@ -27,7 +27,7 @@ experiments/    Where I do various runs and report on them
 ### TODO:
 * [x]  Make checkpoint of 'id' (Autoencoder) 'effect' to use for (optionally) initializing network.
 * [ ]  More effects! Leon Fedden's [RenderMan](https://github.com/fedden/RenderMan) VST host was just updated to Python 3.6.  I have yet to try it out. (A Python VST host is something I've wanted for this project for a long time!)
-* [ ]  Integrate TensorBoard, e.g. via Pytorch [tensorboardX](https://github.com/lanpa/tensorboard-pytorch)
+* [ ]  Better visualization of weights & data, e.g. via [tensorboard](https://github.com/yunjey/pytorch-tutorial/tree/master/tutorials/04-utils/tensorboard) (with or without [tensorboardX](https://github.com/lanpa/tensorboard-pytorch)), [visdom](https://github.com/facebookresearch/visdom) or [Crayon](https://github.com/torrvision/crayon)
 * [ ]  Write a Dataset generator class, e.g. via pytorch's [torchaudio](https://github.com/pytorch/audio)
 * [ ]  Try mu-law companding to see if it improves SNR
 * [ ]  Add parameterized controls, e.g. by concatenating in the middle of the network. 
