@@ -1,3 +1,5 @@
+
+## Basic Overview
 First attempt: with multiple, randomly-placed 'plucks'.  Red is "on the grid".
 ![image1](../../images/TimeAlignPic1_many_plusminus.png)
 
@@ -29,11 +31,11 @@ Current maximum length I can get is 10500 samples, or around 340ms at 44.1Hz.  T
 
 ## Skip connections:
 
-Added skip connections; seems to have reached the same level of error as before, only gets there faster:
+Added skip connections to the model; seems to have reached the same level of error as before, only gets there faster:
 ![image](loss_skips.png)
 
 
-### Adding `strength` 'knob'
+## Adding `strength` 'knob'
 
 Instead of moving the erroneous event exactly 'onto the grid' (henceforth "OTG"), I introduced a tunable parameter `strength` for which
 `strength=0` means leaving the event unedited, and `strength=1` means put it exactly on the grid.  Mathematically,
