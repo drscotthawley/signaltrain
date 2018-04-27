@@ -26,7 +26,9 @@ In reality, though, there will be a precding event.  In this case, interestingly
 
 Obviously this is a function of how it was trained.  If it were trained on a dataset that did cross-fades, then presumably (I have yet to try this) it would learn to approximate a cross-fade.
 
-Current maximum length I can get is 10500 samples, or around 340ms at 44.1Hz.  This is sufficient for most drum samples.  
+Current maximum length I could get is 10500 samples, or around 230ms at 44.1Hz.  This is sufficient for most drum samples.  
+
+***UPDATE: with skip connections (below), as well as wrapping the FNNAnalysis & FNNSynthesis routines with 'shrinking' layers before & after, allowed the size of each 'chunk' to be increased to 15000 samples, i.e. 340ms at 44.1kHz.  (Chunk size limit is mainly set by size of VRAM of NVIDIA Titan X GPU -- much larger and the model can't fit in VRAM.)***  
 
 
 ## Skip connections:
@@ -35,7 +37,6 @@ Added skip connections to the model; seems to have reached the same level of err
 ![image](loss_skips.png)
 
 The best results (not shown above) were actually obtained by only using the "larger" 2 of the 3 skip connections I added.  The skip which spanned the "tiniest" part of the network didn't help much, but was also responsible for some high frequency noise.  Not including that skip helped reduced the noise.  I speculate that this skip was actually hindering the bottleneck-ing process of representation-learning, by providing a bypass. 
-
 
 ## Adding `strength` 'knob'
 
