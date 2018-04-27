@@ -47,11 +47,14 @@ we define the target time to be
 ...i.e., strength linearly interpolates between the input time and the OTG time.  
 
 **Results**: With the same learning rate as before, this is hard to do.  But if you reduce the learning rate, you can get some nice results:
+
 ![vloss graph](strength=0.5/vloss_hist_graph_strength=0.5.png)
+
 ![progress graph](strength=0.5/progress0.png)
 
 
-Future work:
+## Future work:
 
+- Pass the strength parameter into the neural network model, e.g. concatenate it in the 'bottleneck' part of the network 
 - Read in actual audio samples of drums
-- For that, having a pytorch Dataset class (e.g. via torchaudio) might be a good idea. 
+- For drum samples, having a pytorch Dataset class (e.g. via torchaudio) might be a good idea. 
