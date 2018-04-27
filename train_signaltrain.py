@@ -8,7 +8,7 @@ import torch
 import argparse
 import signaltrain as st
 
-from tensorboardX import SummaryWriter
+#from tensorboardX import SummaryWriter
 
 def train_model(model, optimizer, criterion, X_train, Y_train,
     X_val=None, Y_val=None, losslogger=None, effect='ta',
