@@ -63,34 +63,38 @@ def gen_pluck(length, t=None, amp=None, freq=None, decay=None, t0=0.0):
 
 
 # this operates using only one processor, and time-aligns one 'event' (which may be a 'pluck')
-def ta_oneproc(input_sigs, target_sigs, chunk_size, event_len, num_events, chunk_index):
+def ta_oneproc(input_sigs, target_sigs, chunk_size, event_len, num_events, strength, chunk_index):
+    #  strength is a 0..1 'knob' that parameterizes the amount of time-shift applied: 0=no effect, 1=full ('on the grid')
     sig_length = chunk_size
 
-    base_event = gen_pluck( int(event_len*1.5))
+    base_event = gen_pluck( int(event_len*1.5))            # 'base event' just the preceding event, to the right
     target_sigs[chunk_index, 0: base_event.size()[-1]] = base_event
     input_sigs[chunk_index, 0: base_event.size()[-1]] = base_event
 
     for eventnum in range(num_events):
         event = gen_pluck(event_len)
 
-        # target: space events evenly
-        itar_bgn = int(eventnum*event_len) + int(chunk_size/2)
-        itar_end = min(itar_bgn + event_len, sig_length-1)
-        target_sigs[chunk_index, itar_bgn:itar_end] = event[0 : itar_end - itar_bgn]
+        # figure out where the erroneous input event should be, and where the target event should be
+        grid_index = int(eventnum*event_len) + int(chunk_size/2)          # this is the target index value for "hard editing" / "on the grid"
+        random_shift =  int ( (event_len/5)* (2*np.random.random()-1) )   # amount 'off' to place input event from the grid; the 1/5 is just an estimation
+
+        input_index = grid_index + random_shift
+        target_index =  int( strength*grid_index + (1.0-strength)*input_index )   # here's where the strength knob does its work
+
+        itarget_bgn = target_index
+        itarget_end = min(itarget_bgn + event_len, sig_length-1)
+        target_sigs[chunk_index, itarget_bgn:itarget_end] = event[0 : itarget_end - itarget_bgn]
 
         # input: randomly shift it for input
-        if (eventnum > -1):
-            iinp_bgn = max(0, int(itar_bgn + (event_len/6)* (2*np.random.random()-1) ) )  # forward or backward
-        else:
-            iinp_bgn = int( itar_bgn + (event_len/6)*np.random.random())  # only backward or on time
-        iinp_end = min(iinp_bgn + event_len, sig_length-1)
-        input_sigs[chunk_index, iinp_bgn:iinp_end] = event[0: iinp_end - iinp_bgn ]
+        iinput_bgn = max(0, input_index )  # just don't let it go off the front end; TODO: this works but is sloppy;
+        iinput_end = min(iinput_bgn + event_len, sig_length-1)
+        input_sigs[chunk_index, iinput_bgn:iinput_end] = event[0: iinput_end - iinput_bgn ]
 
     return # note we don't have to return arrays because ThreadPool shares memory
 
 
 # this runs in parallel, calling ta_oneproc many times to do multiple time-alignments
-def gen_timealign_pairs(chunk_size, num_chunks, num_events=1, parallel=True):
+def gen_timealign_pairs(chunk_size, num_chunks, num_events=1, parallel=True, strength=1.0):
     input_sigs = torch.zeros((num_chunks, chunk_size))
     target_sigs = input_sigs.clone()#  0.1*torch.randn((num_chunks, chunk_size))
     sig_length = chunk_size
@@ -99,12 +103,12 @@ def gen_timealign_pairs(chunk_size, num_chunks, num_events=1, parallel=True):
 
     if (parallel):
         pool = Pool()
-        pool.map( partial(ta_oneproc, input_sigs, target_sigs, chunk_size, event_len, num_events), chunk_indices)
+        pool.map( partial(ta_oneproc, input_sigs, target_sigs, chunk_size, event_len, num_events, strength), chunk_indices)
         pool.close()
         pool.join()
     else:
         for chunk_index in chunk_indices:
-            ta_oneproc(input_sigs, target_sigs, chunk_size, event_len, num_events, chunk_index)
+            ta_oneproc(input_sigs, target_sigs, chunk_size, event_len, num_events, strength, chunk_index)
     return input_sigs, target_sigs
 
 
@@ -327,7 +331,7 @@ def gen_audio(sig_length, chunk_size=8192, effect='ta', input_var=None, target_v
         input_stack, target_stack = gen_pitch_shifted_pairs(chunk_size, fs, amp_fac, freq_fac, num_waves, num_chunks)
 
     elif ('ta' == effect):  # time align
-        input_stack, target_stack = gen_timealign_pairs(chunk_size, num_chunks)
+        input_stack, target_stack = gen_timealign_pairs(chunk_size, num_chunks, strength=0.5)
     else:                   # other effects, where target can be generated from input instead of both together
         # Generate input signal
         clips_per_chunk = 4

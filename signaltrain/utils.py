@@ -118,8 +118,10 @@ def make_report(input_var, target_var, wave_form, loss_log, outfile=None, epoch=
     panels[0].set_ylabel('Loss')
     panels[0].set_xlabel('Epoch')
     panels[0].legend(loc=1)
-    xmin=100
-    panels[0].set_xlim(left=xmin)  # ignore the 1st 100 epochs (better when plotting with loglog scale)
+    xmin = 1
+    if (lhist[-1,0] > 100):  # ignore the 1st 100 epochs (better when plotting with loglog scale)
+        xmin = 100
+    panels[0].set_xlim(left=xmin)
     panels[0].set_ylim(top=lhist[xmin,1])
 
     # middle panels: sample function(s)

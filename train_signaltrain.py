@@ -14,7 +14,7 @@ def train_model(model, optimizer, criterion, X_train, Y_train,
     X_val=None, Y_val=None, losslogger=None, effect='ta',
     start_epoch=1, max_epochs=100,
     batch_size=100, sig_length=8192*100, fs=44100.,
-    tol=1e-14, change_every=10, save_every=20, plot_every=10, retain_graph=False):
+    tol=1e-14, change_every=10, save_every=20, plot_every=20, retain_graph=False):
 
     if (losslogger is None):
         losslogger = st.utils.LossLogger()
@@ -66,7 +66,7 @@ def train_model(model, optimizer, criterion, X_train, Y_train,
 
             if (0 == epoch % plot_every):
                 outfile = 'progress'+device
-                print("Saving progress report to ",outfile,'.*',sep="")
+                print("Writing progress report to ",outfile,'.*',sep="")
                 st.utils.make_report(X_train, Y_train, wave_form, losslogger, outfile=outfile, epoch=epoch)
                 st.models.model_viz(model,outfile)
 
@@ -110,14 +110,15 @@ def main():
     parser.add_argument('--epochs', default=10000, type=int, help="Number of iterations to train for")
     chunk_max = 15000     # roughly the maximum model size that will fit in memory on Titan X Pascal GPU
                           # if you immediately get OOM errors, decrease chunk_max
-    parser.add_argument('--length', default=chunk_max*6000, type=int, help="Length of each audio signal (then cut up into chunks)")
     parser.add_argument('--chunk', default=chunk_max, type=int, help="Length of each 'chunk' or window that input signal is chopped up into")
-    parser.add_argument('--plot', default=20, type=int, help="Plot report every this many epochs")
+    parser.add_argument('--length', default=chunk_max*6000, type=int, help="Length of each audio signal (then cut up into chunks)")
+
 
     parser.add_argument('--fs', default=44100, type=int, help="Sample rate in Hertz")
     parser.add_argument('--device', default=0, type=int, help="CUDA device to use (e.g. 0 or 1)")
     parser.add_argument('--change', default=20, type=int, help="Changed data every this many epochs")
-
+    parser.add_argument('--save', default=100, type=int, help="Save checkpoint (if best) every this many epochs")
+    parser.add_argument('--plot', default=100, type=int, help="Plot report every this many epochs")
     parser.add_argument('--model', default='specsg', type=str,
                     help="Model type: 'specsg', 'spectral' or 'seq2seq'")
 
@@ -170,7 +171,7 @@ def main():
 
     losslogger = st.utils.LossLogger()
     criterion = torch.nn.MSELoss()
-    optimizer = torch.optim.Adam([ {'params': model.parameters()}], lr = 0.001, eps=5e-6)#,  amsgrad=True)
+    optimizer = torch.optim.Adam([ {'params': model.parameters()}], lr = 2e-4, eps=5e-6)#,  amsgrad=True)
 
     #-------------------------------------------------
     # Checkpoint recovery (if possible and requested) OR initialize just the weights
@@ -200,7 +201,9 @@ def main():
     #---------------
     model = train_model(model, optimizer, criterion, X_train, Y_train, X_val=X_val, Y_val=Y_val,
         start_epoch=start_epoch, max_epochs=args.epochs, losslogger=losslogger, effect=args.effect,
-        fs=fs, sig_length=sig_length, change_every=args.change, plot_every=args.plot, retain_graph=retain_graph)
+        fs=fs, sig_length=sig_length,
+        save_every=args.save, change_every=args.change, plot_every=args.plot,
+        retain_graph=retain_graph)
 
     #--------------------------------
     # Evaluate model on Test dataset

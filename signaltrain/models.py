@@ -149,16 +149,23 @@ class SpecEncDec(nn.Module):
         y = y.squeeze(0)
         return y
 
+# little hack for making sure grid sizes can split data evenly between 2 GPUs
+def nearest_even(x):
+    y = int(x)
+    if (0 == y % 2):
+        return y
+    else:
+        return y+1
 
 class SpecShrinkGrow(nn.Module):  # spectral bottleneck encoder
     def __init__(self, chunk_size=1024):
         super(SpecShrinkGrow, self).__init__()
 
 
-        ratio = 3   # Reduction ratio. Also tried 2; 3 works about as well as 2.  4 seems to be too much
-
-        mid_size = int(chunk_size/ratio)
-        ft_size = int(mid_size /ratio)  # previously used ft_size = chunk_size, but that was limiting GPU memory usage
+        ratio = 3   # Reduction ratio. 3 works about as well as 2.  4 seems to be too much
+                    # one problem with ratio of 3 is it can produce odd sizes that don't split the data evenly between two GPUs
+        mid_size = nearest_even(chunk_size/ratio)
+        ft_size = nearest_even(mid_size /ratio)  # previously used ft_size = chunk_size, but that was limiting GPU memory usage
 
         # these shrink & grow routines are just to try to decrease encoder-decoder GPU memory usage
         self.front_shrink = nn.Linear(chunk_size, mid_size, bias=False)
@@ -171,9 +178,12 @@ class SpecShrinkGrow(nn.Module):  # spectral bottleneck encoder
         self.decoder = front_end.FNNSynthesis(ft_size=ft_size)#, random_init=True)  #  random_init=True gives me better Val scores
 
         # define some more size variables for shrinking & growing sizes in between encoder & decoder
-        full_dim  = int(ft_size/2 +1)   # this is the size of the output from the FNNAnalysis routine
-        med_dim   = int(full_dim / ratio)
-        small_dim = int(med_dim / ratio)
+        full_dim  = int(ft_size/2+1)   # this is the size of the output from the FNNAnalysis routine
+        med_dim   = nearest_even(full_dim / ratio)
+        small_dim = nearest_even(med_dim / ratio)
+
+        #print("chunk_size, mid_size, ft_size = ",chunk_size, mid_size, ft_size)
+        #print("full_dim, med_dim, small_dim = ",full_dim, med_dim, small_dim)
 
         self.shrink  = nn.Linear(full_dim,  med_dim, bias=False)
         self.shrink2 = nn.Linear(med_dim,   small_dim, bias=False)
