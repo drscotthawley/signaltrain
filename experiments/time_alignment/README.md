@@ -28,7 +28,7 @@ Obviously this is a function of how it was trained.  If it were trained on a dat
 
 Current maximum length I could get is 10500 samples, or around 230ms at 44.1Hz.  This is sufficient for most drum samples.  
 
-***UPDATE: with skip connections (below), as well as wrapping the FNNAnalysis & FNNSynthesis routines with 'shrinking' layers before & after, allowed the size of each 'chunk' to be increased to 15000 samples, i.e. 340ms at 44.1kHz.  (Chunk size limit is mainly set by size of VRAM of NVIDIA Titan X GPU -- much larger and the model can't fit in VRAM.)***  
+***UPDATE: with skip connections (below), as well as wrapping the FNNAnalysis & FNNSynthesis routines with shrinking/growing layers before/after, allowed the size of each 'chunk' to be increased to 15000 samples, i.e. 340ms at 44.1kHz.  (Chunk size limit is mainly set by size of VRAM of NVIDIA Titan X GPU -- much larger and the model can't fit in VRAM.)***  
 
 
 ## Skip connections:
