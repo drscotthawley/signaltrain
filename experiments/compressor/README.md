@@ -1,5 +1,7 @@
  
- A compressor affect has not been possible for most of the history of this project.  Recently, adding skip connections to the shrink-grow FNN spectral model was able to produce something roughly matching the compressor:
+ A compressor affect has not been possible at any time in the history of this project -- the LSTM networks simply 'refused' to learn anything (at least not on a discernable timescale).  
+ 
+ Recently, however, adding skip connections to the shrink-grow FNN spectral model was able to produce something roughly matching the compressor:
  
  ![comp_image](../../images/progress0_comp_skips.png) 
  
