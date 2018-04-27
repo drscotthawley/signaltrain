@@ -33,6 +33,22 @@ Added skip connections; seems to have reached the same level of error as before,
 ![image](loss_skips.png)
 
 
+### Adding `strength` 'knob'
+
+Instead of moving the erroneous event exactly 'onto the grid' (henceforth "OTG"), I introduced a tunable parameter `strength` for which
+`strength=0` means leaving the event unedited, and `strength=1` means put it exactly on the grid.  Mathematically,
+given the onset time of the input event, t_i, and the onset time of the fully-edited OTG version t_g,
+we define the target time to be
+
+`t_target = strength * t_g + (1 - strength) * t_i`
+
+...i.e., strength linearly interpolates between the input time and the OTG time.  
+
+**Results**: With the same learning rate as before, this is hard to do.  But if you reduce the learning rate, you can get some nice results:
+![vloss graph](strength=0.5/vloss_hist_graph_strength=0.5.png)
+![progress graph](strength=0.5/progress0.png)
+
+
 Future work:
 
 - Read in actual audio samples of drums
