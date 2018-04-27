@@ -46,7 +46,7 @@ we define the target time to be
 
 ...i.e., strength linearly interpolates between the input time and the OTG time.  
 
-**Results**: With the same learning rate as before, this is hard to do.  But if you reduce the learning rate, you can get some nice results:
+**Results**: With the same learning rate as before, this is hard to do.  But if you reduce the learning rate, you can get some nice results (if you're willing to wait for them):
 
 ![vloss graph](strength=0.5/vloss_hist_graph_strength=0.5.png)
 
