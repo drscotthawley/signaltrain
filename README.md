@@ -32,7 +32,7 @@ experiments/    Where I do various runs and report on them
 * [ ]  Try mu-law companding to see if it improves SNR
 * [ ]  Add parameterized controls, e.g. by concatenating in the middle of the network. 
 * [ ]  A wavenet architecture? 
-* [ ]  Try replacing MSE loss with an audio classifier and turn this into a GAN? 
+* [ ]  Try replacing MSE loss with an audio classifier and turn this into a GAN?  (Note: tried [a simple version of this idea](https://gist.github.com/drscotthawley/f0ecdc49d1c98d20dae26eb115b044b8) which didn't work out. Maybe I'm doing it wrong?) 
 
 
 #### History:
