@@ -99,7 +99,7 @@ def load_weights(model, filename='checkpoint.pth.tar'):
 
 
 def make_report(input_var, target_var, wave_form, loss_log, outfile=None, epoch=None, show_input=True,
-    diff=False):
+    diff=False, separate=True):
     mse =loss_log.loss_hist[-1]
 
 
@@ -127,15 +127,20 @@ def make_report(input_var, target_var, wave_form, loss_log, outfile=None, epoch=
     # middle panels: sample function(s)
     for example in range(num_examples):
         # convert to numpy arrays
-        wf = wave_form.squeeze(1).data.cpu().numpy()[example, :]
-        inp = input_var.squeeze(1).data.cpu().numpy()[example, :]
-        tar = target_var.squeeze(1).data.cpu().numpy()[example, :]
+        i = example
+        if separate:
+            i = 0
+        inp = input_var.squeeze(1).data.cpu().numpy()[i, :]
+        tar = target_var.squeeze(1).data.cpu().numpy()[i, :]
+        wf = wave_form.squeeze(1).data.cpu().numpy()[i, :]
 
         p = example+1
-        if (show_input):
+        if ((not separate) and show_input) or (separate and (0==example)):
             panels[p].plot(inp, 'b-', label='Input', linewidth=lw)
-        panels[p].plot(tar, 'r-', label='Target', linewidth=lw)
-        panels[p].plot(wf, 'g-', label='Output', linewidth=lw)
+        if (not separate) or (example >=1):
+            panels[p].plot(tar, 'r-', label='Target', linewidth=lw)
+        if (not separate) or (2==example):
+            panels[p].plot(wf, 'g-', label='Output', linewidth=lw)
         ampmax = 1.0 # 1.1*np.max(input_sig)
         panels[p].set_ylim((-ampmax,ampmax))   # zoom in
         if (0 == example):
@@ -143,6 +148,7 @@ def make_report(input_var, target_var, wave_form, loss_log, outfile=None, epoch=
             if (None != epoch):
                 outstr += ', Epoch = '+str(epoch)
             panels[p].text(0, 0.85*ampmax, outstr )
+        if separate or (0 == example):
             panels[p].legend(loc=1)
 
     # panels[3]: difference
