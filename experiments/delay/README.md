@@ -6,3 +6,5 @@ As with other effects, the model seems to have a hard time at the beginning of e
 It's easier to see the results if we separate out the blue, red & green lines:
 ![progress image split](progress0_split.png)
 
+Here's one more...
+![delay image 2](delay2.png)
