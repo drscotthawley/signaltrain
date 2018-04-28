@@ -217,19 +217,11 @@ class FNNAnalysis(nn.Module):
         f_matrix_real = (np.real(f_matrix)).astype(np.float32)
         f_matrix_imag = (np.imag(f_matrix)).astype(np.float32)
 
-        if torch.has_cudnn:
-            self.fnn_analysis_real.weight.data.copy_(torch.from_numpy(f_matrix_real).cuda())
-            self.fnn_analysis_imag.weight.data.copy_(torch.from_numpy(f_matrix_imag).cuda())
-        else:
-            self.fnn_analysis_real.weight.data.copy_(torch.from_numpy(f_matrix_real))
-            self.fnn_analysis_imag.weight.data.copy_(torch.from_numpy(f_matrix_imag))
+        # Note from Scott: can CUDA-ify later by calling, e.g., model.cuda()
+        self.fnn_analysis_real.weight.data.copy_(torch.from_numpy(f_matrix_real))
+        self.fnn_analysis_imag.weight.data.copy_(torch.from_numpy(f_matrix_imag))
 
     def forward(self, wave_form):
-        #print("self.sz = ",self.sz)
-        #print("wave_form.size() =",wave_form.size())
-        #real = self.fnn_analysis_real(wave_form)
-        #print("real.size() = ",real.size(),", self.half_N =",self.half_N)
-
         an_real = self.fnn_analysis_real(wave_form)[:, :, :self.half_N]
         an_imag = self.fnn_analysis_imag(wave_form)[:, :, :self.half_N]
 
@@ -272,13 +264,8 @@ class FNNSynthesis(nn.Module):
         f_matrix_real = (np.real(f_matrix)).astype(np.float32)
         f_matrix_imag = (np.imag(f_matrix)).astype(np.float32)
 
-        if torch.has_cudnn:
-            self.fnn_synthesis_real.weight.data.copy_(torch.from_numpy(f_matrix_real.T).cuda())
-            self.fnn_synthesis_imag.weight.data.copy_(torch.from_numpy(f_matrix_imag.T).cuda())
-
-        else:
-            self.fnn_synthesis_real.weight.data.copy_(torch.from_numpy(f_matrix_real.T))
-            self.fnn_synthesis_imag.weight.data.copy_(torch.from_numpy(f_matrix_imag.T))
+        self.fnn_synthesis_real.weight.data.copy_(torch.from_numpy(f_matrix_real.T))
+        self.fnn_synthesis_imag.weight.data.copy_(torch.from_numpy(f_matrix_imag.T))
 
     def initialize_random(self):
         print('Initializing randomly')
@@ -286,7 +273,6 @@ class FNNSynthesis(nn.Module):
         nn.init.xavier_uniform(self.fnn_synthesis_imag.weight)
 
     def forward(self, real, imag):
-
         real = torch.cat((real, FNNSynthesis.flip(real[:, :, 1:-1].contiguous(), 2)), 2)
         imag = torch.cat((imag, FNNSynthesis.flip(-imag[:, :, 1:-1].contiguous(), 2)), 2)
 
