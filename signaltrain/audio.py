@@ -276,17 +276,19 @@ class Limiter:
 #  effect params is a string, such as
 #        effectparams=[ ("vol", [ b'18dB' ]), ]
 # See the sox docs for more info: http://sox.sourceforge.net/sox.html#EFFECTS
-def apply_sox_effect(signal, effectparams=[("lowpass", [b'500']),]):
-    sr = 44100
+def apply_sox_effect(signal, sr, fxstr):
     inpath, outpath = 'in.wav', 'out.wav'
     librosa.output.write_wav(inpath, signal, sr)         # write the input audio to a file
 
+    tmp = fxstr.split(',')
+    fxname = tmp[0]
+    fxvals = [str.encode(x) for x in tmp[1:]]
+    effectparams = [(fxname, fxvals),]
     app = pysox.CSoxApp(inpath, outpath, effectparams=effectparams)   # apply the sox effect & get new file
     app.flow()
 
-    out_signal, sr = librosa.load(outpath, sr=sr)
+    out_signal, sr = librosa.load(outpath, sr)
     return out_signal
-
 
 
 
@@ -322,13 +324,10 @@ def functions(x, f='id'):                # function to be learned
         y = limiter.limit(x, 0.5)
         limiter = None                           # forced garbage collection.
         return y
-    elif ('sox' in f):                           # it's a sox effect, parse a comma-separated string and send
-        tmp = f.split(',')                       # example f = "sox,lowpass,500"
-        fxname = tmp[1]
-        fxvals = [str.encode(x) for x in tmp[2:]]
-        effectparams = [(fxname, fxvals),]
+    elif ('sox,' in f):                           # it's a sox effect, parse a comma-separated string
+        fxstr = f.replace('sox,' , '')            # e.g. f = "sox,lowpass,500"; ignore the "sox," part
         print(" Calling apply_sox_effect with effectparams =",effectparams,', len(x) =',len(x))
-        y = apply_sox_effect(x, effectparams=effectparams)
+        y = apply_sox_effect(x, fxstr=fxstr)
         print("....and we're back, len(y) = ",len(y))
         return y
     else:
