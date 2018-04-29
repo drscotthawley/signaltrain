@@ -26,7 +26,7 @@ experiments/    Where I do various runs and report on them
 
 ### TODO:
 * [x]  Make checkpoint of 'id' (Autoencoder) 'effect' to use for (optionally) initializing network.
-* [ ]  More effects! Leon Fedden's [RenderMan](https://github.com/fedden/RenderMan) VST host was just updated to Python 3.6. I've gotten it working, but haven't figured out how to send audio in & out. (It might only do "out", e.g. for synths.)
+* [ ]  More effects!  Added `sox` support (write to file, calls sox, reads another file).  Currently no working Python VST hosts, but [one is in development](https://github.com/igorgad/dpm).
 * [ ]  Better visualization of weights & data, e.g. via [tensorboard](https://github.com/yunjey/pytorch-tutorial/tree/master/tutorials/04-utils/tensorboard) (with or without [tensorboardX](https://github.com/lanpa/tensorboard-pytorch)), [visdom](https://github.com/facebookresearch/visdom) or [Crayon](https://github.com/torrvision/crayon)
 * [ ]  Write a Dataset generator class, e.g. via pytorch's [torchaudio](https://github.com/pytorch/audio)
 * [ ]  Try mu-law companding to see if it improves SNR
