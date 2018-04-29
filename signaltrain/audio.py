@@ -10,26 +10,11 @@ from multiprocessing.pool import ThreadPool as Pool
 from functools import partial
 import scipy.signal as signal
 from torch.utils.data.dataset import Dataset
+import pysox
 #import matplotlib.pyplot as plt   # just for debugging
 
 # Note: torchaudio is also a thing! requires sox. See http://pytorch.org/audio/,  https://github.com/pytorch/audio
 
-
-# TODO: skeleton for future Dataset class for Pytorch Dataloaders.  Not finished.
-#    Reading from http://pytorch.org/audio/datasets.html
-class AudioDataset(Dataset):
-    def __init__(self, stuff):
-        # function is where the initial logic happens like reading a csv, assigning transforms etc.
-        pass
-
-    def __getitem__(self, index):
-        # function returns the data and labels. This function is called from dataloader like this:
-        #      img, label = MyCustomDataset.__getitem__(99)  # For 99th item
-        # this is where torchvision transforms are often used
-        return (img, label)
-
-    def __len__(self):
-        return count # of how many examples(images?) you have
 
 
 
@@ -43,7 +28,7 @@ def read_audio_file(filename):
         return sig, fs
 
 
-def write_audio_file(filename, sig, fs):
+def write_audio_file(filename, sig, fs=44100):
     librosa.output.write_wav(filename, sig, fs)
     return
 
@@ -249,6 +234,62 @@ def compressor(x, thresh=-35, ratio=3, attack=2000, dtype=np.float32):
     return y
 
 
+
+# Modified from https://bastibe.de/2012-11-02-real-time-signal-processing-in-python.html
+class Limiter:
+    def __init__(self, attack_coeff, release_coeff, delay, dtype=np.float32):
+        self.delay_index = 0
+        self.envelope = 0
+        self.gain = 0.5
+        self.delay = delay
+        self.delay_line = np.zeros(delay, dtype=dtype)
+        self.release_coeff = release_coeff
+        self.attack_coeff = attack_coeff
+
+    def limit(self, signal, threshold):
+        out = np.copy(signal)
+        for i in range(len(signal)):
+            self.delay_line[self.delay_index] = signal[i]
+            self.delay_index = (self.delay_index + 1) % self.delay
+
+            # calculate an envelope of the signal
+            self.envelope *= self.release_coeff
+            self.envelope  = max(abs(signal[i]), self.envelope)
+
+            # have self.gain go towards a desired limiter gain
+            #print("i, self.envelope, threshold = ",i, self.envelope, threshold)
+            if self.envelope > threshold:
+                target_gain = (1+threshold-self.envelope)
+            else:
+                target_gain = 1.0
+            self.gain = ( self.gain*self.attack_coeff +
+                          target_gain*(1-self.attack_coeff) )
+
+            # limit the delayed signal
+            out[i] = self.delay_line[self.delay_index] * self.gain
+        return out
+
+
+
+# This writes to a file, processes it via sox, and reads back the output files
+# requires that sox and pysox are installed
+#  effect params is a string, such as
+#        effectparams=[ ("vol", [ b'18dB' ]), ]
+# See the sox docs for more info: http://sox.sourceforge.net/sox.html#EFFECTS
+def apply_sox_effect(signal, effectparams=[("lowpass", [b'500']),]):
+    sr = 44100
+    inpath, outpath = 'in.wav', 'out.wav'
+    librosa.output.write_wav(inpath, signal, sr)         # write the input audio to a file
+
+    app = pysox.CSoxApp(inpath, outpath, effectparams=effectparams)   # apply the sox effect & get new file
+    app.flow()
+
+    out_signal, sr = librosa.load(outpath, sr=sr)
+    return out_signal
+
+
+
+
 '''-----------------------------------------------------------------------------
    'functions' is a repository of various audio effects, which in some cases are
     literally just simple (time-independent) functions
@@ -276,9 +317,24 @@ def functions(x, f='id'):                # function to be learned
         return echo(x)
     elif ('comp' == f):
         return compressor(x)
+    elif ('lim' == f):
+        limiter = Limiter(.1,  0.5, 30)          # TODO: slow, always re-allocating delay line
+        y = limiter.limit(x, 0.5)
+        limiter = None                           # forced garbage collection.
+        return y
+    elif ('sox' in f):                           # it's a sox effect, parse a comma-separated string and send
+        tmp = f.split(',')                       # example f = "sox,lowpass,500"
+        fxname = tmp[1]
+        fxvals = [str.encode(x) for x in tmp[2:]]
+        effectparams = [(fxname, fxvals),]
+        print(" Calling apply_sox_effect with effectparams =",effectparams,', len(x) =',len(x))
+        y = apply_sox_effect(x, effectparams=effectparams)
+        print("....and we're back, len(y) = ",len(y))
+        return y
     else:
         print("functions: error invalid type")
         assert(False)  # probably more graceful ways to exit, but I want to know immediately
+
 
 
 
@@ -368,5 +424,29 @@ def gen_audio(sig_length, chunk_size=8192, effect='ta', input_var=None, target_v
 
     #print("   Leaving gen_data with input_stack.size() = ",input_stack.size())
     return input_var, target_var
+
+
+
+
+# TODO: skeleton for future Dataset class for Pytorch Dataloaders.  Not finished.
+#    Reading from http://pytorch.org/audio/datasets.html
+class AudioDataset(Dataset):
+    def __init__(self, sig_length, chunk_size=8192, effect='ta', input_var=None, target_var=None):
+        # function is where the initial logic happens like reading a csv, assigning transforms etc.
+        # and allocating memory
+        self.num_chunks = int(sig_length / chunk_size)
+
+
+    def __getitem__(self, index):
+        # function returns the data and labels. This function is called from dataloader like this:
+        #      img, label = MyCustomDataset.__getitem__(99)  # For 99th item
+        # this is where torchvision transforms are often used
+        return (img, label)
+
+    def __len__(self):
+        return self.num_chunks # of how many examples(images?) you have
+
+
+
 
 # EOF
