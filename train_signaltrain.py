@@ -10,43 +10,63 @@ import signaltrain as st
 
 #from tensorboardX import SummaryWriter
 
-def train_model(model, optimizer, criterion, X_train, Y_train,
-    X_val=None, Y_val=None, losslogger=None, effect='ta',
-    start_epoch=1, max_epochs=100,
-    batch_size=100, sig_length=8192*100, fs=44100.,
-    tol=1e-14, change_every=10, save_every=20, plot_every=20, retain_graph=False):
+def train_model(model, optimizer, criterion, X_train, Y_train, cmd_args,
+    X_val=None, Y_val=None, losslogger=None, start_epoch=1, fs=44100,
+    retain_graph=False, mu_law=False, tol=1e-14, dataset=None):
+
+    # arguments from the command line
+    batch_size = cmd_args.batch
+    max_epochs = cmd_args.epochs
+    effect = cmd_args.effect
+    sig_length= cmd_args.length
+    save_every = cmd_args.save
+    change_every = cmd_args.change
+    plot_every = cmd_args.plot
+    model_name = cmd_args.model
+    chunk_size = cmd_args.chunk
+
+    print("X_train.size() =",X_train.size(),", batch_size =",batch_size)
+    if (0 != X_train.size()[0] % batch_size):
+        raise ValueError("X_train.size()[0] = ", X_train.size()[0],
+            ", must be an integer multiple of batch_size =",batch_size)
+    nbatches =  int(X_train.size()[0] / batch_size)
+    print(nbatches,"batches per epoch")
+
+    if (dataset is not None):
+        dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
 
     if (losslogger is None):
         losslogger = st.utils.LossLogger()
 
     for epoch_iter in range(1, 1 + max_epochs - start_epoch): # start w/ 1 so can plot log/log scale
         epoch = start_epoch + epoch_iter
-
-        # change the input dataset to encourage generality
-        if (epoch > start_epoch) and (0 == epoch_iter % change_every):
-            print("Preparing new data...")
-            X_train, Y_train = st.audio.gen_audio(sig_length, chunk_size=int(X_train.size()[-1]), effect=effect, input_var=X_train, target_var=Y_train)
-
         print('Epoch ', epoch,' /', max_epochs, sep="", end=":")
 
-        n_batches = 1#X_train.size()[0]
-        for batch in range(n_batches):
-            batch_index = batch * batch_size
+        # re-generate the input dataset occasionally, to encourage generality
+        if (epoch > start_epoch) and (0 == epoch_iter % change_every):
+            print("Preparing new data...")
+            X_train, Y_train = st.audio.gen_audio(sig_length, chunk_size=int(X_train.size()[-1]),
+                effect=effect, input_var=X_train, target_var=Y_train)
+
+        # Batch training with dataloader.... not quite working yet
+        #for ibatch, data in enumerate(dataloader):   # batches
+        #    X_train_batch, X_train_batch =  data['input'], data['target']
+
+        for bi in range(nbatches):
+            bstart = bi * batch_size
+            X_train_batch = X_train[bstart : bstart + batch_size, :]
+            Y_train_batch = Y_train[bstart : bstart + batch_size, :]
 
             optimizer.zero_grad()                 # get ready to accumulate new gradients
-            wave_form = model(X_train)            # run the neural network forward
-            loss = criterion(wave_form, Y_train)  # score the output of forward inference
 
-            if (X_val is None):   # we'll print both Trainin & validation losses later if we can
-                losslogger.update(epoch, loss, None)
+            # forward + backward + optimize
+            wave_form = model(X_train_batch)
+            loss = criterion(wave_form, Y_train_batch)  # score the output of forward inference
+            loss.backward(retain_graph=retain_graph)    # usually retain_graph=False unless we use an RNN
+            optimizer.step()
 
-            if loss.data.cpu().numpy() < tol:
-                break
-
-            # TODO: move this back once we're doing 'real' batches
-            if (n_batches > 1):
-                loss.backward(retain_graph=retain_graph)
-                optimizer.step()
+        if loss.data.cpu().numpy() < tol:
+            break
 
         #----- after full dataset run through (all batches),do various reporting & diagnostic things
 
@@ -67,22 +87,15 @@ def train_model(model, optimizer, criterion, X_train, Y_train,
             if (0 == epoch % plot_every):
                 outfile = 'progress'+device
                 print("Writing progress report to ",outfile,'.*',sep="")
-                st.utils.make_report(X_train, Y_train, wave_form, losslogger, outfile=outfile, epoch=epoch)
+                st.utils.make_report(X_val, Y_val, Ypred_val, losslogger, outfile=outfile, epoch=epoch, mu_law=mu_law)
                 st.models.model_viz(model,outfile)
-
-        # TODO: move this back up if we get batches working properly
-        if (1 == n_batches):
-            loss.backward(retain_graph=False)#retain_graph)
-            optimizer.step()
-
-        if loss.data.cpu().numpy() < tol:  # need this 2nd break to get out of main Epoch loop
-            break
 
     return model
 
 
 # One additional model evaluation on Test or Val data
-def eval_model(model, criterion, losslogger, sig_length, chunk_size, fs=44100., X=None, Y=None, effect='ta'): # X=input, Y=target
+def eval_model(model, criterion, losslogger, sig_length, chunk_size, fs=44100.,
+    X=None, Y=None, effect='ta', mu_law=False): # X=input, Y=target
     print("\n\nEvaluating model: loss_num=",end="")
     if (None == X):
         X, Y = st.audio.gen_audio(sig_length, chunk_size=chunk_size, effect=effect)
@@ -93,45 +106,50 @@ def eval_model(model, criterion, losslogger, sig_length, chunk_size, fs=44100., 
     device = str(torch.cuda.current_device())
     outfile = 'final'+device
     print("Saving final Test evaluation report to ",outfile,".*",sep="")
-    st.utils.make_report(X, Y, Ypred, losslogger, outfile=outfile)
+    st.utils.make_report(X, Y, Ypred, losslogger, outfile=outfile, mu_law=mu_law)
     return
 
 
 #-------------------------------------------------------------------------------
-# MAIN BLOCK
+#                                MAIN BLOCK
 #-------------------------------------------------------------------------------
 def main():
+
     # set random seeds: useful for ensuring similar initializations when testing different (hyper)parameters
     torch.manual_seed(1)
     np.random.seed(1)
 
+
+    #-------------------------------
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='trains SignalTrain effects mapper', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--epochs', default=10000, type=int, help="Number of iterations to train for")
+    #-------------------------------
     chunk_max = 15000     # roughly the maximum model size that will fit in memory on Titan X Pascal GPU
                           # if you immediately get OOM errors, decrease chunk_max
-    parser.add_argument('--chunk', default=chunk_max, type=int, help="Length of each 'chunk' or window that input signal is chopped up into")
-    parser.add_argument('--length', default=chunk_max*10000, type=int, help="Length of each audio signal (then cut up into chunks)")
+    batch_size = 500      # one big batch (e.g. 8000) runs faster per epoch, but smaller batches converge faster
+    length = chunk_max * 10000
 
-
-    parser.add_argument('--fs', default=44100, type=int, help="Sample rate in Hertz")
-    parser.add_argument('--device', default=0, type=int, help="CUDA device to use (e.g. 0 or 1)")
+    parser = argparse.ArgumentParser(description='trains SignalTrain effects mapper', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--batch', default=batch_size, type=int, help="Batch size")  # TODO: get batch_size>1 working
     parser.add_argument('--change', default=20, type=int, help="Changed data every this many epochs")
+    parser.add_argument('--chunk', default=chunk_max, type=int, help="Length of each 'chunk' or window that input signal is chopped up into")
+    parser.add_argument('--device', default=0, type=int, help="CUDA device to use (e.g. 0 or 1)")
+    parser.add_argument('--effect', default='ta', type=str,
+                    help="Audio effect to try. Names are in signaltrain/audio.py. (default='ta' for time-alignment)")
+    parser.add_argument('--epochs', default=10000, type=int, help="Number of iterations to train for")
+    parser.add_argument('--fs', default=44100, type=int, help="Sample rate in Hertz")
+    parser.add_argument('--length', default=length, type=int, help="Length of each audio signal (then cut up into chunks)")
+    parser.add_argument('--model', choices=['specsg','spectral','seq2seq','wavenet'], default='specsg', type=str,
+                    help="Name of model lto use")
+    parser.add_argument('--plot', default=20, type=int, help="Plot report every this many epochs")
     parser.add_argument('--save', default=100, type=int, help="Save checkpoint (if best) every this many epochs")
-    parser.add_argument('--plot', default=100, type=int, help="Plot report every this many epochs")
-    parser.add_argument('--model', default='specsg', type=str,
-                    help="Model type: 'specsg', 'spectral' or 'seq2seq'")
 
     # user can load a checkpoint file from a previous run: Either recall 'everything' (--resume) or just the weights (--init)
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint.  Cannot be used with --init')
     group.add_argument('--init', default='', type=str, metavar='PATH',
-                    help='initialize weights using checkpoint file. Like --resume only w/ default logger & optimizer')
+                    help='initialize weights w/ checkpoint file. Like --resume only w/o logger & optimizer')
 
-    # audio effect to apply.    TODO: if effect name is not on the internal list, then check for a matching VST plugin via RenderMan
-    parser.add_argument('--effect', default='ta', type=str,
-                    help="Audio effect to try. Names are in signaltrain/audio.py. (default='ta' for time-alignment)")
     # TODO: decide how to specify paramaters to audio effects: individual values, or allow 'sweeps'?  Probably parse a string.
 
     # TODO: add command-line options for input & target audio:  Normally we synthesize everything, but we could:
@@ -139,12 +157,11 @@ def main():
     #    - Read lots input audio, and then apply the desired effect
     #    - Assemble input (and target?) audio by pasting together short clips from a library of samples/clips (e.g. of drum sounds)
 
-
-
     args = parser.parse_args()
     print("args = ",args)
     sig_length = args.length
     fs = args.fs
+
 
     #--------------------
     # Check CUDA status
@@ -160,26 +177,44 @@ def main():
     # Set up model and training criteria
     #------------------------------------
     retain_graph = False  # retain_graph only needed for RNN models. It's a memory hog
+    mu_law = False # with mu-law companding, not only do we scale the floats into ints,
+                  #  but the regression model should be turned into a multi-class classifier
+                  # which means the target & output 'Y' values should get one-hot encoded
+
     if ('seq2seq' == args.model):
         model = st.models.Seq2Seq()
         retain_graph=True
     elif ('specsg' == args.model):
         model = st.models.SpecShrinkGrow(chunk_size=args.chunk)
+    elif ('wavenet' == args.model):
+        model = st.models.WaveNet()
+        mu_law = True
     else:
         model = st.models.SpecEncDec(ft_size=args.chunk)
+
     model = torch.nn.DataParallel(model)       # run on multiple GPUs if possible
 
+    #----------------------------------------------------------------
+    #  Set additional training specs based on which model was chosen
+    #----------------------------------------------------------------
     losslogger = st.utils.LossLogger()
-    criterion = torch.nn.MSELoss()
-    optimizer = torch.optim.Adam([ {'params': model.parameters()}], lr = 2e-4, eps=5e-6)#,  amsgrad=True)
 
-    #-------------------------------------------------
-    # Checkpoint recovery (if possible and requested) OR initialize just the weights
-    #-------------------------------------------------
+    if ('wavenet' == args.model):
+        raise ValueError("Sorry, model 'wavenet' isn't working yet.")
+        criterion = torch.nn.CrossEntropyLoss()
+        optimizer = torch.optim.Adam( model.parameters(), lr=0.01)
+    else:
+        criterion = torch.nn.MSELoss()
+        optimizer = torch.optim.Adam( model.parameters(), lr=2e-4, eps=5e-6)#,  amsgrad=True)
+
+
+    #-------------------------------------------------------------------
+    # Checkpoint recovery (if requested) OR initialize just the weights
+    #-------------------------------------------------------------------
     start_epoch = 0
-    if ('' != args.resume):
+    if ('' != args.resume):  # load weights and omptimizer settings, etc.
         model, optimizer, start_epoch, losslogger = st.utils.load_checkpoint(model, optimizer, losslogger, filename=args.resume)
-    elif ('' != args.init):
+    elif ('' != args.init):  # just load weights
         model = st.utils.load_weights(model, filename=args.init)   # why do this? because I want to try starting from 'autoencoder' weights
 
     #------------------------------------------------------------------
@@ -192,23 +227,22 @@ def main():
     # Set up Training and Validation datasets
     #------------------------------------------
     print("Peparing Training data...")
-    X_train, Y_train = st.audio.gen_audio(sig_length, chunk_size=args.chunk, effect=args.effect)
+    dataset = None#  st.audio.AudioDataset(args.length, chunk_size=args.chunk, effect=args.effect)
+    X_train, Y_train = st.audio.gen_audio(sig_length, chunk_size=args.chunk, effect=args.effect, mu_law=mu_law)
     print("Peparing Validation data...")
-    X_val, Y_val = st.audio.gen_audio(int(sig_length/5), chunk_size=args.chunk, effect=args.effect)
+    X_val, Y_val = st.audio.gen_audio(int(sig_length/5), chunk_size=args.chunk, effect=args.effect, mu_law=mu_law)
 
-    #---------------
-    # Training Loop
-    #---------------
-    model = train_model(model, optimizer, criterion, X_train, Y_train, X_val=X_val, Y_val=Y_val,
-        start_epoch=start_epoch, max_epochs=args.epochs, losslogger=losslogger, effect=args.effect,
-        fs=fs, sig_length=sig_length,
-        save_every=args.save, change_every=args.change, plot_every=args.plot,
-        retain_graph=retain_graph)
+    #--------------------
+    # Call training Loop
+    #--------------------
+    model = train_model(model, optimizer, criterion, X_train, Y_train, args,
+        X_val=X_val, Y_val=Y_val, start_epoch=start_epoch, losslogger=losslogger, fs=fs,
+        retain_graph=retain_graph, mu_law=mu_law, dataset=dataset)
 
     #--------------------------------
     # Evaluate model on Test dataset
     #--------------------------------
-    eval_model(model, criterion, losslogger,  sig_length, chunk_size=args.chunk, fs=fs, effect=args.effect)
+    eval_model(model, criterion, losslogger, sig_length, chunk_size=args.chunk, fs=fs, effect=args.effect, mu_law=mu_law)
     return
 
 if __name__ == '__main__':
