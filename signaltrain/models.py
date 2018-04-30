@@ -1,5 +1,4 @@
 
-
 __author__ = 'S.H. Hawley'
 
 # imports
@@ -158,6 +157,12 @@ def nearest_even(x):
         return y+1
 
 class SpecShrinkGrow(nn.Module):  # spectral bottleneck encoder
+    # This model first projects the input audio to smaller sizes, using some 'dense' layers,
+    #  Then calls the FNN analysis routine, does show shinking & growing, calls FNNSynthesis,
+    #  and then expands back out to the original audio size.
+    #  Two skip connections are present; more or fewer produced worse results that this.
+    #  For a diagram of thi smodel, see ../docs/model_diagram.png
+    #
     def __init__(self, chunk_size=1024):
         super(SpecShrinkGrow, self).__init__()
 
@@ -194,12 +199,13 @@ class SpecShrinkGrow(nn.Module):  # spectral bottleneck encoder
         self.mapskip  = nn.Linear(2*full_dim,  full_dim, bias=False)  # maps concatenated skip connection to 'regular' size
         self.mapskip2 = nn.Linear(2*med_dim,   med_dim, bias=False)
         self.bigskip = nn.Linear(2*mid_size,   mid_size, bias=False)
+        #self.finalskip = nn.Linear(2*chunk_size,   chunk_size, bias=False)  # does not fit in CUDA memory
 
         self.act     = nn.LeakyReLU()   # Tried ReLU, ELU, SELU; Leaky seems to work best.  SELU yields instability
 
-    def forward(self, input_var, skips=(2,3,)):    # my trials indicate skips=(2,3) works best. (1,2,3) has more noise, (3) converges slower, no skips converges slowest
-        y = input_var
-        y_s = self.act( self.front_shrink(y) )     # _s to prepare for skip connection "skips=3"
+    def forward(self, input_var, skips=(2,3,4)):    # my trials indicate skips=(2,3) works best. (1,2,3) has more noise, (3) converges slower, no skips converges slowest
+        y_orig = input_var
+        y_s = self.act( self.front_shrink(y_orig) )     # _s to prepare for skip connection "skips=3"
         y = self.act( self.front_shrink2(y_s) )
 
         y = y.unsqueeze(0)   # hack to deal with batch size of 1 right now; TODO: remove this
@@ -209,7 +215,7 @@ class SpecShrinkGrow(nn.Module):  # spectral bottleneck encoder
         real, imag = self.act( self.shrink2(real_s2) ), self.act( self.shrink2(imag_s2) )
         real, imag = self.act( self.grow2(real) ),   self.act( self.grow2(imag) )
 
-        if (1 in skips):  # this one has no discernable effect
+        if (1 in skips):  # this one has no discernable effect; but does yield more noise
             real, imag = self.mapskip2(torch.cat((real, real_s2), 2)), self.mapskip2(torch.cat((imag, imag_s2), 2))   # make skip connection
 
         real, imag = self.act( self.grow(real) ),    self.act( self.grow(imag) )
@@ -223,7 +229,88 @@ class SpecShrinkGrow(nn.Module):  # spectral bottleneck encoder
         if (3 in skips):
             y = self.bigskip( torch.cat((y, y_s), 1) )
         y = self.back_grow(y)
+        #if (4 in skips):
+        #    y = self.finalskip( torch.cat((y, y_orig), 1) )  # too memory-intensive for large audio clips
         return y
+
+
+class SpecShrinkGrow_nobatch(nn.Module):  # spectral bottleneck encoder
+    # This model first projects the input audio to smaller sizes, using some 'dense' layers,
+    #  Then calls the FNN analysis routine, does show shinking & growing, calls FNNSynthesis,
+    #  and then expands back out to the original audio size.
+    #  Two skip connections are present; more or fewer produced worse results that this.
+    #  For a diagram of thi smodel, see ../docs/model_diagram.png
+    #
+    def __init__(self, chunk_size=1024):
+        super(SpecShrinkGrow, self).__init__()
+
+
+        ratio = 3   # Reduction ratio. 3 works about as well as 2.  4 seems to be too much
+                    # one problem with ratio of 3 is it can produce odd sizes that don't split the data evenly between two GPUs
+        mid_size = nearest_even(chunk_size/ratio)
+        ft_size = nearest_even(mid_size /ratio)  # previously used ft_size = chunk_size, but that was limiting GPU memory usage
+
+        # these shrink & grow routines are just to try to decrease encoder-decoder GPU memory usage
+        self.front_shrink = nn.Linear(chunk_size, mid_size, bias=False)
+        self.front_shrink2 = nn.Linear(mid_size, ft_size, bias=False)
+        self.back_grow2    = nn.Linear(ft_size, mid_size, bias=False)
+        self.back_grow    = nn.Linear(mid_size, chunk_size, bias=False)
+
+        # the "FFT" routines
+        self.encoder = front_end.FNNAnalysis(ft_size=ft_size)   # gives matrix mult. size mismatches
+        self.decoder = front_end.FNNSynthesis(ft_size=ft_size)#, random_init=True)  #  random_init=True gives me better Val scores
+
+        # define some more size variables for shrinking & growing sizes in between encoder & decoder
+        full_dim  = int(ft_size/2+1)   # this is the size of the output from the FNNAnalysis routine
+        med_dim   = nearest_even(full_dim / ratio)
+        small_dim = nearest_even(med_dim / ratio)
+
+        #print("chunk_size, mid_size, ft_size = ",chunk_size, mid_size, ft_size)
+        #print("full_dim, med_dim, small_dim = ",full_dim, med_dim, small_dim)
+
+        self.shrink  = nn.Linear(full_dim,  med_dim, bias=False)
+        self.shrink2 = nn.Linear(med_dim,   small_dim, bias=False)
+        #self.dense = nn.Linear(self.small_dim, self.small_dim, bias=False)  # not needed
+        self.grow2   = nn.Linear(small_dim, med_dim, bias=False)
+        self.grow    = nn.Linear(med_dim,   full_dim, bias=False)
+
+        self.mapskip  = nn.Linear(2*full_dim,  full_dim, bias=False)  # maps concatenated skip connection to 'regular' size
+        self.mapskip2 = nn.Linear(2*med_dim,   med_dim, bias=False)
+        self.bigskip = nn.Linear(2*mid_size,   mid_size, bias=False)
+        #self.finalskip = nn.Linear(2*chunk_size,   chunk_size, bias=False)  # does not fit in CUDA memory
+
+        self.act     = nn.LeakyReLU()   # Tried ReLU, ELU, SELU; Leaky seems to work best.  SELU yields instability
+
+    def forward(self, input_var, skips=(2,3,4)):    # my trials indicate skips=(2,3) works best. (1,2,3) has more noise, (3) converges slower, no skips converges slowest
+        y_orig = input_var
+        y_s = self.act( self.front_shrink(y_orig) )     # _s to prepare for skip connection "skips=3"
+        y = self.act( self.front_shrink2(y_s) )
+
+        y = y.unsqueeze(0)   # hack to deal with batch size of 1 right now; TODO: remove this
+        real_s, imag_s = self.encoder(y)                                                        # _s to prep for skip connection skips=2
+        real_s2, imag_s2 = self.act( self.shrink(real_s) ),  self.act( self.shrink(imag_s) )    # _s2 for other skip connection  skips=1
+
+        real, imag = self.act( self.shrink2(real_s2) ), self.act( self.shrink2(imag_s2) )
+        real, imag = self.act( self.grow2(real) ),   self.act( self.grow2(imag) )
+
+        if (1 in skips):  # this one has no discernable effect; but does yield more noise
+            real, imag = self.mapskip2(torch.cat((real, real_s2), 2)), self.mapskip2(torch.cat((imag, imag_s2), 2))   # make skip connection
+
+        real, imag = self.act( self.grow(real) ),    self.act( self.grow(imag) )
+
+        if (2 in skips):
+            real, imag = self.mapskip(torch.cat((real, real_s), 2)), self.mapskip(torch.cat((imag, imag_s), 2))   # make skip connection
+
+        y = self.decoder(real, imag)
+        y = y.squeeze(0)
+        y = self.act(self.back_grow2(y))
+        if (3 in skips):
+            y = self.bigskip( torch.cat((y, y_s), 1) )
+        y = self.back_grow(y)
+        #if (4 in skips):
+        #    y = self.finalskip( torch.cat((y, y_orig), 1) )  # too memory-intensive for large audio clips
+        return y
+
 
 
 class SpecEncDec_old(nn.Module):  # old version; unused
@@ -308,6 +395,124 @@ class Seq2Seq(nn.Module):
             return result.cuda()
         else:
             return result
+
+
+# From  https://gist.github.com/lirnli/4282fcdfb383bb160cacf41d8c783c70
+#  One hot encoding for WaveNet (below)
+class One_Hot(nn.Module):
+    def __init__(self, depth):
+        super(One_Hot,self).__init__()
+        self.depth = depth
+        self.ones = torch.sparse.torch.eye(depth).cuda()
+
+    def forward(self, X_in):
+        #print("X_in.squeeze(0).data = ",X_in.squeeze(0).data)
+        #print("OneHot forward: X_in = ",X_in)
+        return Variable(self.ones.index_select(0,X_in.squeeze(0).data))
+    def __repr__(self):
+        return self.__class__.__name__ + "({})".format(self.depth)
+
+# From  https://gist.github.com/lirnli/4282fcdfb383bb160cacf41d8c783c70
+# This assumes that the input and target signals have been mu-law companded
+class WaveNet(nn.Module):
+    def __init__(self, mu=256,n_residue=32, n_skip= 512, dilation_depth=10, n_repeat=5):
+        # mu: audio quantization size
+        # n_residue: residue channels
+        # n_skip: skip channels
+        # dilation_depth & n_repeat: dilation layer setup
+        super(WaveNet, self).__init__()
+        print("Initializing WaveNet")
+        self.dilation_depth = dilation_depth
+        dilations = self.dilations = [2**i for i in range(dilation_depth)] * n_repeat
+        self.one_hot = One_Hot(mu).cuda()
+        self.from_input = nn.Conv1d(in_channels=mu, out_channels=n_residue, kernel_size=1)
+        self.conv_sigmoid = nn.ModuleList([nn.Conv1d(in_channels=n_residue, out_channels=n_residue, kernel_size=2, dilation=d)
+                         for d in dilations])
+        self.conv_tanh = nn.ModuleList([nn.Conv1d(in_channels=n_residue, out_channels=n_residue, kernel_size=2, dilation=d)
+                         for d in dilations])
+        self.skip_scale = nn.ModuleList([nn.Conv1d(in_channels=n_residue, out_channels=n_skip, kernel_size=1)
+                         for d in dilations])
+        self.residue_scale = nn.ModuleList([nn.Conv1d(in_channels=n_residue, out_channels=n_residue, kernel_size=1)
+                         for d in dilations])
+        self.conv_post_1 = nn.Conv1d(in_channels=n_skip, out_channels=n_skip, kernel_size=1)
+        self.conv_post_2 = nn.Conv1d(in_channels=n_skip, out_channels=mu, kernel_size=1)
+
+    def forward(self, input):
+        print("  wavenet forward: input = ",input)
+        output = self.preprocess(input)
+        skip_connections = [] # save for generation purposes
+        for s, t, skip_scale, residue_scale in zip(self.conv_sigmoid, self.conv_tanh, self.skip_scale, self.residue_scale):
+            output, skip = self.residue_forward(output, s, t, skip_scale, residue_scale)
+            skip_connections.append(skip)
+        # sum up skip connections
+        output = sum([s[:,:,-output.size(2):] for s in skip_connections])
+        output = self.postprocess(output)
+        return output
+
+    def preprocess(self, input):
+        output = self.one_hot(input).unsqueeze(0).transpose(1,2)
+        output = self.from_input(output)
+        return output
+
+    def postprocess(self, input):
+        output = nn.functional.elu(input)
+        output = self.conv_post_1(output)
+        output = nn.functional.elu(output)
+        output = self.conv_post_2(output).squeeze(0).transpose(0,1)
+        return output
+
+    def residue_forward(self, input, conv_sigmoid, conv_tanh, skip_scale, residue_scale):
+        output = input
+        output_sigmoid, output_tanh = conv_sigmoid(output), conv_tanh(output)
+        output = nn.functional.sigmoid(output_sigmoid) * nn.functional.tanh(output_tanh)
+        skip = skip_scale(output)
+        output = residue_scale(output)
+        output = output + input[:,:,-output.size(2):]
+        return output, skip
+
+    def generate_slow(self, input, n=100):
+        res = input.data.tolist()
+        for _ in range(n):
+            x = Variable(torch.LongTensor(res[-sum(self.dilations)-1:]))
+            y = self.forward(x)
+            _, i = y.max(dim=1)
+            res.append(i.data.tolist()[-1])
+        return res
+
+    def generate(self, input=None, n=100, temperature=None, estimate_time=False):
+        ## prepare output_buffer
+        output = self.preprocess(input)
+        output_buffer = []
+        for s, t, skip_scale, residue_scale, d in zip(self.conv_sigmoid, self.conv_tanh, self.skip_scale, self.residue_scale, self.dilations):
+            output, _ = self.residue_forward(output, s, t, skip_scale, residue_scale)
+            sz = 1 if d==2**(self.dilation_depth-1) else d*2
+            output_buffer.append(output[:,:,-sz-1:-1])
+        ## generate new
+        res = input.data.tolist()
+        for i in range(n):
+            output = Variable(torch.LongTensor(res[-2:])).cuda()
+            output = self.preprocess(output)
+            output_buffer_next = []
+            skip_connections = [] # save for generation purposes
+            for s, t, skip_scale, residue_scale, b in zip(self.conv_sigmoid, self.conv_tanh, self.skip_scale, self.residue_scale, output_buffer):
+                output, residue = self.residue_forward(output, s, t, skip_scale, residue_scale)
+                output = torch.cat([b, output], dim=2)
+                skip_connections.append(residue)
+                if i%100==0:
+                    output = output.clone()
+                output_buffer_next.append(output[:,:,-b.size(2):])
+            output_buffer = output_buffer_next
+            output = output[:,:,-1:]
+            # sum up skip connections
+            output = sum(skip_connections)
+            output = self.postprocess(output)
+            if temperature is None:
+                _, output = output.max(dim=1)
+            else:
+                output = output.div(temperature).exp().multinomial(1).squeeze()
+            res.append(output.data[-1])
+        return res
+
 
 
 
