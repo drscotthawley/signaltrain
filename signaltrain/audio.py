@@ -66,7 +66,7 @@ def ta_oneproc(input_sigs, target_sigs, chunk_size, event_len, num_events, stren
 
         # figure out where the erroneous input event should be, and where the target event should be
         grid_index = int(eventnum*event_len) + int(chunk_size/2)          # this is the target index value for "hard editing" / "on the grid"
-        random_shift =  int ( (event_len/5)* (2*np.random.random()-1) )   # amount 'off' to place input event from the grid; the 1/5 is just an estimation
+        random_shift =  int ( (event_len/4)* (2*np.random.random()-1) )   # amount 'off' to place input event from the grid; the 1/4 is just an estimation
 
         input_index = grid_index + random_shift
         target_index =  int( strength*grid_index + (1.0-strength)*input_index )   # here's where the strength knob does its work
@@ -463,6 +463,7 @@ def gen_audio(sig_length, chunk_size=8192, effect='ta', input_var=None, target_v
 
     input_var = Variable(input_stack, requires_grad=x_grad)
     target_var = Variable(target_stack, requires_grad=False)
+    
     if torch.has_cudnn:
         input_var = input_var.cuda()
         target_var = target_var.cuda()
