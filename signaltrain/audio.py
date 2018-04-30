@@ -10,9 +10,14 @@ from multiprocessing.pool import ThreadPool as Pool
 from functools import partial
 import scipy.signal as signal
 from torch.utils.data.dataset import Dataset
-import pysox
-#import matplotlib.pyplot as plt   # just for debugging
 
+# optional utility for applying effects via sox
+try:
+    import pysox
+except ImportError:
+    no_pysox = True
+
+#import matplotlib.pyplot as plt   # just for debugging
 # Note: torchaudio is also a thing! requires sox. See http://pytorch.org/audio/, https://github.com/pytorch/audio
 
 
@@ -281,6 +286,8 @@ def apply_sox_effect(signal, fxstr, sr=44100):
     #                fxstr='ladspa;/usr/lib/ladspa/mbeq_1197.so;mbeq;-2;-3;-3;-6;-9;-9;-10;-8;-6;-5;-4;-3;-1;0;0;0'
     #          See the sox docs for more on effects: http://sox.sourceforge.net/sox.html#EFFECTS
     #          (Why semicolon-separated?  Because sox looks for both commas and colons!)
+    if (no_pysox is not None):
+        raise ImportError("You don't have pysox installed.  Can't apply sox effect")
     inpath, outpath = 'in.wav', 'out.wav'
     librosa.output.write_wav(inpath, signal, sr)                     # write the input audio to a file
     tmp = fxstr.split(';')
@@ -394,8 +401,10 @@ def decode_mu_law(y, mu=256):
                                 do everything 'in place', but w/ PyTorch vs. numpy, and
                                 GPU vs CPU, this can get complicated.)
         mu_law:      Set to true to apply mu-law encoding to input & target audio
+        x_grad:      Normally the signal_var generated gets a gradient, but by setting this
+                     to False you can save memory
 ---------------------------------------------------------------------------------------'''
-def gen_audio(sig_length, chunk_size=8192, effect='ta', input_var=None, target_var=None, mu_law=False):
+def gen_audio(sig_length, chunk_size=8192, effect='ta', input_var=None, target_var=None, mu_law=False, x_grad=True):
     dtype = np.float32
 
     # Free up pytorch tensor memory usage before generating new data
@@ -452,7 +461,7 @@ def gen_audio(sig_length, chunk_size=8192, effect='ta', input_var=None, target_v
         input_stack = torch.from_numpy( input_stack )
         target_stack = torch.from_numpy( target_stack )
 
-    input_var = Variable(input_stack)
+    input_var = Variable(input_stack, requires_grad=x_grad)
     target_var = Variable(target_stack, requires_grad=False)
     if torch.has_cudnn:
         input_var = input_var.cuda()
@@ -485,21 +494,20 @@ class Chunkify(object):
                 'target': input.view(self.num_chunks, self.chunk_size) }
 
 
-
 # TODO: skeleton for future Dataset class for Pytorch Dataloaders.  Not finished.
 #    Reading from http://pytorch.org/tutorials/beginner/data_loading_tutorial.html
 #  (torchaudio doesn't install or I'd use that  http://pytorch.org/audio/datasets.html
 # ...this will replace gen_audio, above
 class AudioDataset(Dataset):
-    def __init__(self, sig_length, chunk_size=8192, effect='ta', input_var=None, target_var=None, dtype=np.float32):
-        # function is where the initial logic happens like reading a csv, assigning transforms etc.
-        # and allocating memory
+    def __init__(self, sig_length, chunk_size=8192, effect='ta',  x_grad=True,
+        dtype=np.float32, mode='synth', input_var=None, target_var=None):
+
         self.chunk_size = chunk_size
         self.effect = effect
         self.num_chunks = int(sig_length / chunk_size)
         self.sig_length =  chunk_size * self.num_chunks  # this will pad with zeros to make sure everything fits
-
         self.effect = effect
+        self.mode = mode
 
         # allocate storage for input signal and output signal
         #  this will get chopped up into chunks via a reshape
@@ -527,7 +535,17 @@ class AudioDataset(Dataset):
     def __len__(self):
         return self.input_var.size()[0] # how many examples you have
 
-    def gen_new(self):   # this generates new data and places the results in the vars used by getitem
+    def gen_new(self, mode='synth'):   # this generates new data and places the results in the vars used by getitem
+        """
+             mode:    How the gen_new function acqures new data. (future)
+                         o 'synth'=synthesize new.  Future modes support...
+                         x 'samples'=make a collage of samples.  not working
+                         x 'load'=load audio from file.  not working
+        """
+        supported_modes = ('synth')
+        if mode not in supported_modes:
+            raise ValueError('AudioDataset.gen_new: Unssuported mode "'+mode+'". Supported modes are '+supported_modes)
+
         num_sample_clips = int(self.sig_length / self.clip_size)
         for i in range(num_sample_clips):               #  go through each section of input and assign a waveform
             start_ind = i * self.clip_size
@@ -546,8 +564,8 @@ class AudioDataset(Dataset):
         self.input_sig = chopnstack( self.input_sig, chunk_size=self.chunk_size)
         self.target_sig = chopnstack( self.target_sig, chunk_size=self.chunk_size)
 
-        self.input_var = torch.from_numpy(self.input_sig)
-        self.target_var = torch.from_numpy(self.target_sig) #, requires_grad=False)
+        self.input_var = torch.from_numpy(self.input_sig, requires_grad=x_grad)
+        self.target_var = torch.from_numpy(self.target_sig, requires_grad=False)
         #if torch.has_cudnn:
         #    self.input_var = self.input_var.cuda()
         #    self.target_var = self.target_var.cuda()
