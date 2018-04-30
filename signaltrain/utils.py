@@ -1,4 +1,5 @@
 __author__ = 'S.H. Hawley'
+__version__ = '0.0.1'
 
 # imports
 import numpy as np
@@ -11,6 +12,20 @@ import shutil
 from . import audio as st_audio
 
 
+# simple progress bar for batch training. you can get a better ProgBar if you install something. ;-)
+# ripped off the style of Keras
+def progbar(epoch, max_epochs, batch_index, nbatches, loss, width=40, vloss=None):
+    base_str = '\rEpoch '+str(epoch)+' /'+str(max_epochs)+': '
+    percent = (batch_index+1)/nbatches
+    barlength = int(width * percent)
+    bar  = '='*barlength + '>'
+    leftover = width - barlength
+    space =  ' '*leftover
+    loss_num = loss.data.cpu().numpy()
+    print(base_str + bar + space+' loss: {:10.5e}'.format(loss_num), end="")
+    return
+
+
 # class for keeping track of and printing loss info
 class LossLogger():
     def __init__(self):
@@ -19,26 +34,15 @@ class LossLogger():
         self.vloss_hist = []
         self.best_vloss = 999.9
 
-    def print_loss(self, loss_num, logy=True, vloss_num=None):
-        if (logy):
-            term_width = 180
-            logval = np.log10(loss_num)
-            print(' loss: {:10.5e}'.format(loss_num) ,  ' '*int(term_width + 30*logval)+'*', end="")
-        else:
-            term_width = 100
-            print(' loss: {:10.5e}'.format(loss_num) ,  ' '*int(loss_num/1*term_width)+'*',end="")
-        if (vloss_num is not None):
-            print('  val_loss: {:10.5e}'.format(vloss_num))
-
     def update(self, epoch, loss, vloss):
-        loss_num = loss_num = loss.data.cpu().numpy()  # prior to pytorch 0.4, we needed a [0] on the end of this
+        loss_num = loss.data.cpu().numpy()  # prior to pytorch 0.4, we needed a [0] on the end of this
         self.loss_hist.append([epoch, loss_num])
         if (vloss is not None):
             vloss_num = vloss.data.cpu().numpy() # [0]
             self.vloss_hist.append([epoch, vloss_num])
         else:
             vloss_num = None
-        self.print_loss(loss_num, vloss_num=vloss_num)
+        print('  val_loss: {:10.5e}'.format(vloss_num))
 
     def is_best(self):   # only updates best_vloss when called; this is intentional
         vloss_num = (self.vloss_hist[-1])[-1]
@@ -169,5 +173,17 @@ def make_report(input_var, target_var, wave_form, loss_log, outfile=None, epoch=
     st_audio.write_audio_file(outfile+'_output.wav', wf, sr)
     st_audio.write_audio_file(outfile+'_target.wav', tar, sr)
     return
+
+
+def print_choochoo():
+    # when it's late & I'm watching the loss go down, things like this happen -SHH
+    print(" ~.~.~.~.      ")
+    print(" ____    `.    ")
+    print(" ]DD|_n_n_][   ")
+    print(" |__|_______)  ")
+    print(" 'oo OOOO oo\_ ")
+    print("~+~+~+~+~+~+~+~")
+    print("SignalTrain "+__version__)
+    print("")
 
 # EOF
