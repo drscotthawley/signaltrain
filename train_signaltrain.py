@@ -40,13 +40,15 @@ def train_model(model, optimizer, criterion, X_train, Y_train, cmd_args,
 
     for epoch_iter in range(1, 1 + max_epochs - start_epoch): # start w/ 1 so can plot log/log scale
         epoch = start_epoch + epoch_iter
-        print('Epoch ', epoch,' /', max_epochs, sep="", end=":")
 
         # re-generate the input dataset occasionally, to encourage generality
         if (epoch > start_epoch) and (0 == epoch_iter % change_every):
             print("Preparing new data...")
             X_train, Y_train = st.audio.gen_audio(sig_length, chunk_size=int(X_train.size()[-1]),
                 effect=effect, input_var=X_train, target_var=Y_train)
+
+        # note: we print the Epoch after the new data just to keep the console display 'consistent'
+        print('Epoch ', epoch,' /', max_epochs, sep="", end=":")
 
         # Batch training with dataloader.... not quite working yet
         #for ibatch, data in enumerate(dataloader):   # batches
