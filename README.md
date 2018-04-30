@@ -6,6 +6,10 @@ Learning audio effects with neural networks
 ### Installation:
 `pip install -r requirements.txt`
 
+*Note: SignalTrain is being developed on with PyTorch 0.4 & Python 3.6. Using PyTorch<0.4
+will likely give Tensor-vs-Variable errors.*
+
+
 ### Running:
 `python train_signaltrain.py` or `./train_signaltrain.py`
 
@@ -21,7 +25,7 @@ signaltrain/    The main library
     +--- audio.py       Utilities related to audio production, effects, & more
     +--- utils.py       Grab bag of other utilities
 docs/                   Not much here at the moment
-experiments/    Where I do various runs and report on them
+experiments/    Where I do various runs and report on them. Look here! :-)
 ```
 
 ### TODO:
@@ -30,9 +34,9 @@ experiments/    Where I do various runs and report on them
 * [ ]  Better visualization of weights & data, e.g. via [tensorboard](https://github.com/yunjey/pytorch-tutorial/tree/master/tutorials/04-utils/tensorboard) (with or without [tensorboardX](https://github.com/lanpa/tensorboard-pytorch)), [visdom](https://github.com/facebookresearch/visdom) or [Crayon](https://github.com/torrvision/crayon)
 * [ ]  Write a Dataset generator class, e.g. via pytorch's [torchaudio](https://github.com/pytorch/audio)
 * [ ]  Try mu-law companding to see if it improves SNR
-* [ ]  Add parameterized controls, e.g. by concatenating in the middle of the network. 
-* [ ]  A wavenet architecture? 
-* [ ]  Try replacing MSE loss with an audio classifier and turn this into a GAN?  (Note: tried [a simple version of this idea](https://gist.github.com/drscotthawley/f0ecdc49d1c98d20dae26eb115b044b8) which didn't work out. Maybe I'm doing it wrong?) 
+* [ ]  Add parameterized controls, e.g. by concatenating in the middle of the network.
+* [ ]  A wavenet architecture?
+* [ ]  Try replacing MSE loss with an audio classifier and turn this into a GAN?  (Note: tried [a simple version of this idea](https://gist.github.com/drscotthawley/f0ecdc49d1c98d20dae26eb115b044b8) which didn't work out. Maybe I'm doing it wrong?)
 
 
 #### History:
