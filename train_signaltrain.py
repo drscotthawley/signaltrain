@@ -83,6 +83,8 @@ def train_model(model, optimizer, criteria, lambdas, X_train, Y_train, cmd_args,
             loss.backward(retain_graph=retain_graph)    # usually retain_graph=False unless we use an RNN
             optimizer.step()
 
+            st.utils.progbar(epoch, max_epochs, bi, nbatches, loss)  # show a progress bar through the epoch
+
         if loss.data.cpu().numpy() < tol:
             break
 
@@ -156,10 +158,11 @@ def main():
     parser.add_argument('--epochs', default=10000, type=int, help="Number of iterations to train for")
     parser.add_argument('--fs', default=44100, type=int, help="Sample rate in Hertz")
     parser.add_argument('--length', default=length, type=int, help="Length of each audio signal (then cut up into chunks)")
+    #parser.add_argument('--lr', default=2e-4, type=float, help="Initial learning rate")
     parser.add_argument('--model', choices=['specsg','spectral','seq2seq','wavenet'], default='specsg', type=str,
                     help="Name of model lto use")
     parser.add_argument('--plot', default=20, type=int, help="Plot report every this many epochs")
-    parser.add_argument('--save', default=100, type=int, help="Save checkpoint (if best) every this many epochs")
+    parser.add_argument('--save', default=20, type=int, help="Save checkpoint (if best) every this many epochs")
 
     # user can load a checkpoint file from a previous run: Either recall 'everything' (--resume) or just the weights (--init)
     group = parser.add_mutually_exclusive_group()
@@ -180,6 +183,7 @@ def main():
     sig_length = args.length
     fs = args.fs
 
+    st.utils.print_choochoo()   # display program info
 
     #--------------------
     # Check CUDA status
@@ -217,13 +221,12 @@ def main():
     #----------------------------------------------------------------
     losslogger = st.utils.LossLogger()
 
-    if ('wavenet' != args.model):
+    if (args.model != 'wavenet'):
         criteria = [torch.nn.MSELoss(), torch.nn.L1Loss()]
         lambdas = [0.8, 0.2]
-        optimizer = torch.optim.Adam( model.parameters(), lr=2e-4, eps=5e-6)#,  amsgrad=True)
-
+        optimizer = torch.optim.Adam( model.parameters(), lr=2e-4, eps=5e-6)    #,  amsgrad=True)
     else:
-        raise ValueError("Sorry, model 'wavenet' isn't working yet.")
+        raise ValueError("Sorry, model 'wavenet' isn't ready yet.")
         criteria = [torch.nn.CrossEntropyLoss()]
         lambdas = [1.0]
         optimizer = torch.optim.Adam( model.parameters(), lr=0.01)
