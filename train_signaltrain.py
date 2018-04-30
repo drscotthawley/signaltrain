@@ -10,7 +10,23 @@ import signaltrain as st
 
 #from tensorboardX import SummaryWriter
 
-def train_model(model, optimizer, criterion, X_train, Y_train, cmd_args,
+
+def calc_loss(Y_pred, Y_true, criteria, lambdas):
+    #  Y_pred: the output from the network
+    #  Y_true: the target values
+    #  criteria: an iterable of pytorch loss criteria, e.g. [torch.nn.MSELoss(), torch.nn.L1Loss()]
+    #  lambdas:  a list of regularization parameters
+    assert len(criteria) == len(lambdas), "Must have the same number of criteria as lambdas"
+
+    for i in range(len(criteria)):
+        if (0==i):
+            loss = lambdas[i] * criteria[i](Y_pred, Y_true)
+        else:
+            loss += lambdas[i] * criteria[i](Y_pred, Y_true)
+    return loss
+
+
+def train_model(model, optimizer, criteria, lambdas, X_train, Y_train, cmd_args,
     X_val=None, Y_val=None, losslogger=None, start_epoch=1, fs=44100,
     retain_graph=False, mu_law=False, tol=1e-14, dataset=None):
 
@@ -63,7 +79,7 @@ def train_model(model, optimizer, criterion, X_train, Y_train, cmd_args,
 
             # forward + backward + optimize
             wave_form = model(X_train_batch)
-            loss = criterion(wave_form, Y_train_batch)  # score the output of forward inference
+            loss = calc_loss(wave_form, Y_train_batch, criteria, lambdas)
             loss.backward(retain_graph=retain_graph)    # usually retain_graph=False unless we use an RNN
             optimizer.step()
 
@@ -74,7 +90,7 @@ def train_model(model, optimizer, criterion, X_train, Y_train, cmd_args,
 
         if ((X_val is not None) and (Y_val is not None)):
             Ypred_val = model(X_val)
-            vloss = criterion( Ypred_val, Y_val)
+            vloss = calc_loss(Ypred_val, Y_val, criteria, lambdas)
             losslogger.update(epoch, loss, vloss)
 
         if (epoch > start_epoch):
@@ -201,13 +217,16 @@ def main():
     #----------------------------------------------------------------
     losslogger = st.utils.LossLogger()
 
-    if ('wavenet' == args.model):
-        raise ValueError("Sorry, model 'wavenet' isn't working yet.")
-        criterion = torch.nn.CrossEntropyLoss()
-        optimizer = torch.optim.Adam( model.parameters(), lr=0.01)
-    else:
-        criterion = torch.nn.MSELoss()
+    if ('wavenet' != args.model):
+        criteria = [torch.nn.MSELoss(), torch.nn.L1Loss()]
+        lambdas = [0.8, 0.2]
         optimizer = torch.optim.Adam( model.parameters(), lr=2e-4, eps=5e-6)#,  amsgrad=True)
+
+    else:
+        raise ValueError("Sorry, model 'wavenet' isn't working yet.")
+        criteria = [torch.nn.CrossEntropyLoss()]
+        lambdas = [1.0]
+        optimizer = torch.optim.Adam( model.parameters(), lr=0.01)
 
 
     #-------------------------------------------------------------------
@@ -232,12 +251,12 @@ def main():
     dataset = None#  st.audio.AudioDataset(args.length, chunk_size=args.chunk, effect=args.effect)
     X_train, Y_train = st.audio.gen_audio(sig_length, chunk_size=args.chunk, effect=args.effect, mu_law=mu_law)
     print("Peparing Validation data...")
-    X_val, Y_val = st.audio.gen_audio(int(sig_length/5), chunk_size=args.chunk, effect=args.effect, mu_law=mu_law)
+    X_val, Y_val = st.audio.gen_audio(int(sig_length/5), chunk_size=args.chunk, effect=args.effect, mu_law=mu_law, x_grad=False)
 
     #--------------------
     # Call training Loop
     #--------------------
-    model = train_model(model, optimizer, criterion, X_train, Y_train, args,
+    model = train_model(model, optimizer, criteria, lambdas, X_train, Y_train, args,
         X_val=X_val, Y_val=Y_val, start_epoch=start_epoch, losslogger=losslogger, fs=fs,
         retain_graph=retain_graph, mu_law=mu_law, dataset=dataset)
 
