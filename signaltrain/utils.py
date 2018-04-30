@@ -31,10 +31,10 @@ class LossLogger():
             print('  val_loss: {:10.5e}'.format(vloss_num))
 
     def update(self, epoch, loss, vloss):
-        loss_num = loss.data.cpu().numpy()[0]
+        loss_num = loss_num = loss.data.cpu().numpy()  # prior to pytorch 0.4, we needed a [0] on the end of this
         self.loss_hist.append([epoch, loss_num])
         if (vloss is not None):
-            vloss_num = vloss.data.cpu().numpy()[0]
+            vloss_num = vloss.data.cpu().numpy() # [0]
             self.vloss_hist.append([epoch, vloss_num])
         else:
             vloss_num = None
@@ -58,15 +58,6 @@ def save_checkpoint(state, filename='checkpoint.pth.tar', best_only=False, is_be
     if (not best_only) or is_best:
         print("Saving checkpoint in",filename)
         torch.save(state, filename)
-
-    ''' # I don't care about saving separate best vs. non-best checkpoint files.
-    if is_best:
-        bestname = 'model_best.pth.tar'
-        print("Best val_loss so far!  Copying checkpoint to",bestname)
-        shutil.copyfile(filename, bestname)
-    else:
-        print("")
-    '''
     return
 
 def load_checkpoint(model, optimizer, losslogger, filename='checkpoint.pth.tar'):
@@ -99,16 +90,17 @@ def load_weights(model, filename='checkpoint.pth.tar'):
 
 
 def make_report(input_var, target_var, wave_form, loss_log, outfile=None, epoch=None, show_input=True,
-    diff=False, separate=True):
+    diff=False, mu_law=False):
     mse =loss_log.loss_hist[-1]
 
 
     # --------------
     # make figure
     #--------------
-    num_examples = 3
-    fig, panels = plt.subplots(num_examples+2, figsize=(8.5,11),dpi=120 )
+    num_signal_plots = 3
+    fig, panels = plt.subplots(num_signal_plots+2, figsize=(8.5,11),dpi=120 )
     lw    =   1    # line width
+
 
     # top panel: loss history
     lhist = np.array(loss_log.loss_hist)
@@ -120,36 +112,44 @@ def make_report(input_var, target_var, wave_form, loss_log, outfile=None, epoch=
     panels[0].legend(loc=1)
     xmin = 1
     if (lhist[-1,0] > 100):  # ignore the 1st 100 epochs (better when plotting with loglog scale)
-        xmin = 100
+        xmin = 10
     panels[0].set_xlim(left=xmin)
-    panels[0].set_ylim(top=lhist[xmin,1])
+    panels[0].set_ylim(top= vlhist[xmin,1] )
+
+
+    if (input_var is None):  # exit
+        plt.savefig(outfile+'.pdf')
+        plt.close(fig)
+        return
+
+    # convert to numpy arrays
+    i = np.random.randint(input_var.size()[0])  # pick a random example to plot
+    inp = input_var.squeeze(1).data.cpu().numpy()[i, :]
+    tar = target_var.squeeze(1).data.cpu().numpy()[i, :]
+    wf = wave_form.squeeze(1).data.cpu().numpy()[i, :]
+
+    if mu_law:
+        inp = st_audio.decode_mu_law(inp)
+        tar = st_audio.decode_mu_law(tar)
+        wf  = st_audio.decode_mu_law(wf)
 
     # middle panels: sample function(s)
-    for example in range(num_examples):
-        # convert to numpy arrays
-        i = example
-        if separate:
-            i = 0
-        inp = input_var.squeeze(1).data.cpu().numpy()[i, :]
-        tar = target_var.squeeze(1).data.cpu().numpy()[i, :]
-        wf = wave_form.squeeze(1).data.cpu().numpy()[i, :]
-
-        p = example+1
-        if ((not separate) and show_input) or (separate and (0==example)):
+    for signal_plot in range(num_signal_plots):
+        p = signal_plot+1
+        if (0==signal_plot):
             panels[p].plot(inp, 'b-', label='Input', linewidth=lw)
-        if (not separate) or (example >=1):
+        elif (signal_plot >=1):
             panels[p].plot(tar, 'r-', label='Target', linewidth=lw)
-        if (not separate) or (2==example):
+        if (2==signal_plot):
             panels[p].plot(wf, 'g-', label='Output', linewidth=lw)
         ampmax = 1.0 # 1.1*np.max(input_sig)
         panels[p].set_ylim((-ampmax,ampmax))   # zoom in
-        if (0 == example):
+        if (0 == signal_plot):
             outstr = 'MSE = '+str(mse)
             if (None != epoch):
                 outstr += ', Epoch = '+str(epoch)
             panels[p].text(0, 0.85*ampmax, outstr )
-        if separate or (0 == example):
-            panels[p].legend(loc=1)
+        panels[p].legend(loc=1)
 
     # panels[3]: difference
     diffval = wf - tar
