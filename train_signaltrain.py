@@ -244,6 +244,11 @@ def main():
     # Once checkpoints are loaded (or not), CUDA-ify model if possible
     #------------------------------------------------------------------
     model = model.to(device)
+    # For pytorch 0.4, manually move optimizer parts to GPU as well.  From https://github.com/pytorch/pytorch/issues/2830
+    for state in optimizer.state.values():
+        for k, v in state.items():
+            if isinstance(v, torch.Tensor):
+                state[k] = v.to(device)
 
     #------------------------------------------
     # Set up Training and Validation datasets
