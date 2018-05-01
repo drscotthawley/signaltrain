@@ -159,7 +159,7 @@ def main():
     parser.add_argument('--model', choices=['specsg','spectral','seq2seq','wavenet'], default='specsg', type=str,
                     help="Name of model lto use")
     parser.add_argument("--parallel", help="Run in data-parallel mode",action="store_true")
-    parser.add_argument('--plot', default=20, type=int, help="Plot report every this many epochs")
+    parser.add_argument('--plot', default=5, type=int, help="Plot report every this many epochs")
     parser.add_argument('--save', default=20, type=int, help="Save checkpoint (if best) every this many epochs")
 
     # user can load a checkpoint file from a previous run: Either recall 'everything' (--resume) or just the weights (--init)
