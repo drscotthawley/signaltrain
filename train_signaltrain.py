@@ -96,16 +96,15 @@ def train_model(model, optimizer, criteria, lambdas, X_train, Y_train, cmd_args,
             losslogger.update(epoch, loss, vloss)
 
         if (epoch > start_epoch):
-            device = str(torch.cuda.current_device())
             if (0 == epoch % save_every) or (epoch >= max_epochs-1):
-                checkpoint_name = 'checkpoint'+device+'.pth.tar'
+                checkpoint_name = 'checkpoint.pth.tar'
                 st.utils.save_checkpoint({'epoch': epoch + 1, 'state_dict': model.state_dict(),
                                            'optimizer': optimizer.state_dict(),
                                            'losslogger': losslogger,
                                            }, filename=checkpoint_name, best_only=True, is_best=losslogger.is_best() )
 
             if (0 == epoch % plot_every):
-                outfile = 'progress'+device
+                outfile = 'progress'
                 print("Writing progress report to ",outfile,'.*',sep="")
                 st.utils.make_report(X_val, Y_val, Ypred_val, losslogger, outfile=outfile, epoch=epoch, mu_law=mu_law)
                 st.models.model_viz(model,outfile)
@@ -123,8 +122,7 @@ def eval_model(model, criterion, losslogger, sig_length, chunk_size, fs=44100.,
     loss = criterion(Ypred, Y)
     loss_num = loss.data.cpu().numpy()[0]
     print(loss_num)
-    device = str(torch.cuda.current_device())
-    outfile = 'final'+device
+    outfile = 'final'
     print("Saving final Test evaluation report to ",outfile,".*",sep="")
     st.utils.make_report(X, Y, Ypred, losslogger, outfile=outfile, mu_law=mu_law)
     return
@@ -152,7 +150,6 @@ def main():
     parser.add_argument('--batch', default=batch_size, type=int, help="Batch size")  # TODO: get batch_size>1 working
     parser.add_argument('--change', default=20, type=int, help="Changed data every this many epochs")
     parser.add_argument('--chunk', default=chunk_max, type=int, help="Length of each 'chunk' or window that input signal is chopped up into")
-    parser.add_argument('--device', default=0, type=int, help="CUDA device to use (e.g. 0 or 1)")
     parser.add_argument('--effect', default='ta', type=str,
                     help="Audio effect to try. Names are in signaltrain/audio.py. (default='ta' for time-alignment)")
     parser.add_argument('--epochs', default=10000, type=int, help="Number of iterations to train for")
@@ -161,6 +158,7 @@ def main():
     #parser.add_argument('--lr', default=2e-4, type=float, help="Initial learning rate")
     parser.add_argument('--model', choices=['specsg','spectral','seq2seq','wavenet'], default='specsg', type=str,
                     help="Name of model lto use")
+    parser.add_argument("--parallel", help="Run in data-parallel mode",action="store_true")
     parser.add_argument('--plot', default=20, type=int, help="Plot report every this many epochs")
     parser.add_argument('--save', default=20, type=int, help="Save checkpoint (if best) every this many epochs")
 
@@ -185,15 +183,12 @@ def main():
 
     st.utils.print_choochoo()   # display program info
 
-    #--------------------
-    # Check CUDA status
-    #--------------------
-    if torch.has_cudnn:
-        torch.cuda.set_device(args.device)
-        name = torch.cuda.get_device_name(args.device)
-        print('Running on CUDA: device_count =',torch.cuda.device_count(),'. Using device ',args.device,':',name)
-    else:
-        print('No CUDA')
+    #------------------------------
+    # Check CUDA/CPU device status
+    #------------------------------
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")  # from pytorch 0.4 migration guide
+    print("Running on device",device)
+
 
     #------------------------------------
     # Set up model and training criteria
@@ -214,7 +209,11 @@ def main():
     else:
         model = st.models.SpecEncDec(ft_size=args.chunk)
 
-    model = torch.nn.DataParallel(model)       # run on multiple GPUs if possible
+    # In my experiments, DataParallel runs no faster than single-GPU for the same
+    #   batch size.  It will allow you to run with larger batches, but...that's it.
+    if args.parallel and (torch.cuda.device_count() > 1):
+        print("Let's use", torch.cuda.device_count(), "GPUs!")
+        model = torch.nn.DataParallel(model)
 
     #----------------------------------------------------------------
     #  Set additional training specs based on which model was chosen
@@ -244,8 +243,7 @@ def main():
     #------------------------------------------------------------------
     # Once checkpoints are loaded (or not), CUDA-ify model if possible
     #------------------------------------------------------------------
-    if torch.has_cudnn:
-        model.cuda()
+    model = model.to(device)
 
     #------------------------------------------
     # Set up Training and Validation datasets
@@ -274,3 +272,4 @@ if __name__ == '__main__':
     main()
 
 # EOF
+

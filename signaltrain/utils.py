@@ -175,8 +175,8 @@ def make_report(input_var, target_var, wave_form, loss_log, outfile=None, epoch=
     return
 
 
+# when it's late & I'm watching the loss go down, things like this happen -SHH
 def print_choochoo():
-    # when it's late & I'm watching the loss go down, things like this happen -SHH
     print(" ~.~.~.~.      ")
     print(" ____    `.    ")
     print(" ]DD|_n_n_][   ")

@@ -4,10 +4,20 @@
 Learning audio effects with neural networks
 
 ### Installation:
-`pip install -r requirements.txt`
+I use Anaconda, with Python 3.6, and Pytorch 0.4, on Mac OSX and Linux (Ubuntu 16.04).  
+This has not been tested in other ways.  Here's how I do a fresh install, e.g. into a 'test_st' environment:
+```
+conda create -n test_st python=3.6
+source activate test_st
+git clone https://github.com/drscotthawley/signaltrain.git
+cd signaltrain
+pip install -r requirements.txt
+```
+Test it (with a small run, usuall I run much larger):
+```
+./train_signaltrain.py --length 150000 --batch 10
+```
 
-*Note: SignalTrain is being developed on with PyTorch 0.4 & Python 3.6. Using PyTorch<0.4
-will likely give Tensor-vs-Variable errors.*
 
 
 ### Running:
