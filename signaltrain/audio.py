@@ -229,13 +229,13 @@ def compressor(x, thresh=-35, ratio=3, attack=2000, dtype=np.float32):
     fc = 1.0/(attack)               # this is like 1/attack time
     b, a = signal.butter(1, fc, analog=False)
     zi = signal.lfilter_zi(b, a)
-    dB = 20*np.log10(np.abs(x) + 1e-8)
+    dB = 20*np.log10(np.abs(x) + 1e-8).astype(dtype)
     in_env, _ = signal.lfilter(b, a, dB, zi=zi*dB[0])  # input envelope calculation
     out_env = np.copy(in_env).astype(dtype)               # output envelope
     i = np.where(in_env >  thresh)          # compress where input env exceeds thresh
     out_env[i] = thresh + (in_env[i]-thresh)/ratio
-    gain = np.power(10.0,(out_env-in_env)/10)
-    y = np.copy(x) * gain
+    gain = np.power(10.0,(out_env-in_env)/10).astype(dtype)
+    y = (np.copy(x) * gain).astype(dtype)
     return y
 
 
@@ -392,6 +392,7 @@ def decode_mu_law(y, mu=256):
    Inputs:
          sig_length:  is actually the totally length (in samples) of the the entire dataset,
                      conceived as if it were just one file.  TODO: change this
+         device:     the pytorch device where the computation is performed
          chunk_size: chop up the signal into chunks of this length.
          effect:     string corresponding to a name of an audio effect
                      Some of these just generate generic input & apply the effect to that,
@@ -404,8 +405,8 @@ def decode_mu_law(y, mu=256):
         x_grad:      Normally the signal_var generated gets a gradient, but by setting this
                      to False you can save memory
 ---------------------------------------------------------------------------------------'''
-def gen_audio(sig_length, chunk_size=8192, effect='ta', input_var=None, target_var=None, mu_law=False, x_grad=True):
-    dtype = np.float32
+def gen_audio(sig_length, device, chunk_size=8192, effect='ta', input_var=None, target_var=None, mu_law=False, x_grad=True):
+    dtype=np.float32
 
     # Free up pytorch tensor memory usage before generating new data
     if (input_var is not None) and (target_var is not None):
@@ -461,12 +462,13 @@ def gen_audio(sig_length, chunk_size=8192, effect='ta', input_var=None, target_v
         input_stack = torch.from_numpy( input_stack )
         target_stack = torch.from_numpy( target_stack )
 
-    input_var = Variable(input_stack, requires_grad=x_grad)
-    target_var = Variable(target_stack, requires_grad=False)
-    
-    if torch.has_cudnn:
-        input_var = input_var.cuda()
-        target_var = target_var.cuda()
+    input_var = Variable(input_stack, requires_grad=x_grad).to(device)
+    target_var = Variable(target_stack, requires_grad=False).to(device)
+
+
+    #if torch.has_cudnn:
+    #    input_var = input_var.cuda()
+    #    target_var = target_var.cuda()
 
     #print("   Leaving gen_data with input_stack.size() = ",input_stack.size())
     return input_var, target_var

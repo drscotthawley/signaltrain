@@ -26,7 +26,7 @@ def calc_loss(Y_pred, Y_true, criteria, lambdas):
     return loss
 
 
-def train_model(model, optimizer, criteria, lambdas, X_train, Y_train, cmd_args,
+def train_model(model, optimizer, criteria, lambdas, X_train, Y_train, cmd_args, device,
     X_val=None, Y_val=None, losslogger=None, start_epoch=1, fs=44100,
     retain_graph=False, mu_law=False, tol=1e-14, dataset=None):
 
@@ -60,7 +60,7 @@ def train_model(model, optimizer, criteria, lambdas, X_train, Y_train, cmd_args,
         # re-generate the input dataset occasionally, to encourage generality
         if (epoch > start_epoch) and (0 == epoch_iter % change_every):
             print("Preparing new data...")
-            X_train, Y_train = st.audio.gen_audio(sig_length, chunk_size=int(X_train.size()[-1]),
+            X_train, Y_train = st.audio.gen_audio(sig_length, device, chunk_size=int(X_train.size()[-1]),
                 effect=effect, input_var=X_train, target_var=Y_train)
 
         # note: we print the Epoch after the new data just to keep the console display 'consistent'
@@ -113,7 +113,7 @@ def train_model(model, optimizer, criteria, lambdas, X_train, Y_train, cmd_args,
 
 
 # One additional model evaluation on Test or Val data
-def eval_model(model, criterion, losslogger, sig_length, chunk_size, fs=44100.,
+def eval_model(model, criterion, losslogger, sig_length, chunk_size, device, fs=44100.,
     X=None, Y=None, effect='ta', mu_law=False): # X=input, Y=target
     print("\n\nEvaluating model: loss_num=",end="")
     if (None == X):
@@ -250,21 +250,21 @@ def main():
     #------------------------------------------
     print("Peparing Training data...")
     dataset = None#  st.audio.AudioDataset(args.length, chunk_size=args.chunk, effect=args.effect)
-    X_train, Y_train = st.audio.gen_audio(sig_length, chunk_size=args.chunk, effect=args.effect, mu_law=mu_law)
+    X_train, Y_train = st.audio.gen_audio(sig_length, device, chunk_size=args.chunk, effect=args.effect, mu_law=mu_law)
     print("Peparing Validation data...")
-    X_val, Y_val = st.audio.gen_audio(int(sig_length/5), chunk_size=args.chunk, effect=args.effect, mu_law=mu_law, x_grad=False)
+    X_val, Y_val = st.audio.gen_audio(int(sig_length/5), device, chunk_size=args.chunk, effect=args.effect, mu_law=mu_law, x_grad=False)
 
     #--------------------
     # Call training Loop
     #--------------------
-    model = train_model(model, optimizer, criteria, lambdas, X_train, Y_train, args,
+    model = train_model(model, optimizer, criteria, lambdas, X_train, Y_train, args, device,
         X_val=X_val, Y_val=Y_val, start_epoch=start_epoch, losslogger=losslogger, fs=fs,
         retain_graph=retain_graph, mu_law=mu_law, dataset=dataset)
 
     #--------------------------------
     # Evaluate model on Test dataset
     #--------------------------------
-    eval_model(model, criterion, losslogger, sig_length, chunk_size=args.chunk, fs=fs, effect=args.effect, mu_law=mu_law)
+    eval_model(model, criterion, losslogger, sig_length, device, chunk_size=args.chunk, fs=fs, effect=args.effect, mu_law=mu_law)
     return
 
 if __name__ == '__main__':
@@ -272,4 +272,3 @@ if __name__ == '__main__':
     main()
 
 # EOF
-
