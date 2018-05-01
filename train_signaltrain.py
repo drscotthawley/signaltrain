@@ -113,14 +113,17 @@ def train_model(model, optimizer, criteria, lambdas, X_train, Y_train, cmd_args,
 
 
 # One additional model evaluation on Test or Val data
-def eval_model(model, criterion, losslogger, sig_length, chunk_size, device, fs=44100.,
-    X=None, Y=None, effect='ta', mu_law=False): # X=input, Y=target
+def eval_model(model, criteria, lambdas, losslogger, sig_length, chunk_size, device, effect,
+    fs=44100, X=None, Y=None, mu_law=False):
+    # X_test=input, Y_test=target (optional_cal be regenerated)
     print("\n\nEvaluating model: loss_num=",end="")
     if (None == X):
-        X, Y = st.audio.gen_audio(sig_length, chunk_size=chunk_size, effect=effect)
-    Ypred = model(X)    # run network forward
-    loss = criterion(Ypred, Y)
-    loss_num = loss.data.cpu().numpy()[0]
+        X_test, Y_test = st.audio.gen_audio(int(sig_length/5), device, chunk_size=chunk_size,
+            effect=effect, input_var=X_train, target_var=Y_train)
+        # st.audio.gen_audio(sig_length, chunk_size=chunk_size, effect=effect)
+    Y_pred = model(X)    # run network forward
+    loss = calc_loss(Y_pred, Y_test, criteria, lambdas)
+    loss_num = loss.data.cpu().numpy()
     print(loss_num)
     outfile = 'final'
     print("Saving final Test evaluation report to ",outfile,".*",sep="")
@@ -154,8 +157,10 @@ def main():
                     help="Audio effect to try. Names are in signaltrain/audio.py. (default='ta' for time-alignment)")
     parser.add_argument('--epochs', default=10000, type=int, help="Number of iterations to train for")
     parser.add_argument('--fs', default=44100, type=int, help="Sample rate in Hertz")
+    parser.add_argument('--lambdas', default='1,0', type=str,
+                    help="Comma-separated list of regularization parameters, (MSELoss, L1Loss)")
     parser.add_argument('--length', default=length, type=int, help="Length of each audio signal (then cut up into chunks)")
-    #parser.add_argument('--lr', default=2e-4, type=float, help="Initial learning rate")
+    parser.add_argument('--lr', default=2e-4, type=float, help="Initial learning rate")
     parser.add_argument('--model', choices=['specsg','spectral','seq2seq','wavenet'], default='specsg', type=str,
                     help="Name of model lto use")
     parser.add_argument("--parallel", help="Run in data-parallel mode",action="store_true")
@@ -180,6 +185,7 @@ def main():
     print("args = ",args)
     sig_length = args.length
     fs = args.fs
+    lambdas = [int(x) for x in args.lambdas.split(',')] # turn comma-sep string into list of floats
 
     st.utils.print_choochoo()   # display program info
 
@@ -222,12 +228,11 @@ def main():
 
     if (args.model != 'wavenet'):
         criteria = [torch.nn.MSELoss(), torch.nn.L1Loss()]
-        lambdas = [0.8, 0.2]
-        optimizer = torch.optim.Adam( model.parameters(), lr=2e-4, eps=5e-6)    #,  amsgrad=True)
+        optimizer = torch.optim.Adam( model.parameters(), lr=args.lr, eps=5e-6)    #,  amsgrad=True)
     else:
         raise ValueError("Sorry, model 'wavenet' isn't ready yet.")
         criteria = [torch.nn.CrossEntropyLoss()]
-        lambdas = [1.0]
+        lambdas = [1.0]  # replace any args.lambdas value because there's only one loss in wavenet
         optimizer = torch.optim.Adam( model.parameters(), lr=0.01)
 
 
@@ -269,7 +274,8 @@ def main():
     #--------------------------------
     # Evaluate model on Test dataset
     #--------------------------------
-    eval_model(model, criterion, losslogger, sig_length, device, chunk_size=args.chunk, fs=fs, effect=args.effect, mu_law=mu_law)
+    eval_model(model, criteria, lambdas, losslogger, sig_length, chunk_size, device, args.effect,
+        fs=fs, effect=args.effect, mu_law=mu_law, dataset=dataset)
     return
 
 if __name__ == '__main__':
