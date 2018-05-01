@@ -1,6 +1,6 @@
 torch==0.4
-numpy==1.14.0
-scipy==1.0.0
-matplotlib==2.1.1
-librosa==0.6.0
-pysox==0.3.6a0
+torchvision==0.2.1 
+scipy>=1.0.0
+matplotlib>=2.1.1
+librosa>=0.6.0
+pysox>=0.3.6a0
