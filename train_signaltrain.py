@@ -18,11 +18,9 @@ def calc_loss(Y_pred, Y_true, criteria, lambdas):
     #  lambdas:  a list of regularization parameters
     assert len(criteria) == len(lambdas), "Must have the same number of criteria as lambdas"
 
+    loss = 0
     for i in range(len(criteria)):
-        if (0==i):
-            loss = lambdas[i] * criteria[i](Y_pred, Y_true)
-        else:
-            loss += lambdas[i] * criteria[i](Y_pred, Y_true)
+        loss += lambdas[i] * criteria[i](Y_pred, Y_true)
     return loss
 
 
