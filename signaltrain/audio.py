@@ -436,7 +436,7 @@ def gen_audio(sig_length, device, chunk_size=8192, effect='ta', input_var=None, 
             input_sig[start_ind:start_ind + clip_size] = gen_input_sample(t,chooser=sample_type)
 
         # normalize the input audio to have max amplitude of 0.5; large values are problematic for the input
-        input_sig = 0.5 * input_sig / np.max(input_sig)
+        # input_sig = 0.5 * input_sig / np.max(input_sig)  # but some plugins (e.g. comp) assume full scale
 
 
         if ('delay' == effect):
