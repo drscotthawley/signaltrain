@@ -10,6 +10,7 @@ import torch
 import os
 import shutil
 from . import audio as st_audio
+import datetime  # just to name the log files
 
 
 # simple progress bar for batch training. you can get a better ProgBar if you install something. ;-)
@@ -28,24 +29,46 @@ def progbar(epoch, max_epochs, batch_index, nbatches, loss, width=40, vloss=None
 
 # class for keeping track of and printing loss info
 class LossLogger():
-    def __init__(self):
-        self.loss_hist = []
-        self.epoch_hist = []
-        self.vloss_hist = []
+    def __init__(self, name='run'):
+        # name is the tag for the run. it will be appended with the current time & date
+        #      a directory with this full name will be created, and logs will go there
+        self.history = {'Epoch':[], 'Train':[], 'Val':[], 'Val_':[]}
         self.best_vloss = 999.9
+        self.name = name + '_{date:%H:%M:%S_%b_%d_%Y}'.format( date=datetime.datetime.now() )
+        self.lossfile = self.name + "/" + "losses.csv"
+        self.setup_files()
 
-    def update(self, epoch, loss, vloss):
-        loss_num = loss.data.cpu().numpy()  # prior to pytorch 0.4, we needed a [0] on the end of this
-        self.loss_hist.append([epoch, loss_num])
-        if (vloss is not None):
-            vloss_num = vloss.data.cpu().numpy() # [0]
-            self.vloss_hist.append([epoch, vloss_num])
-        else:
-            vloss_num = None
-        print('  val_loss: {:10.5e}'.format(vloss_num))
+    def setup_files(self):
+        print('LossLogger: logging to directory "'+self.name+'"')
+        os.mkdir(self.name)   # TODO: noclobber. Starting multiple simultaneous runs in the same directory
+                              # with the same tag (unlikely) will fail here
+        with open(self.lossfile, "a") as myfile:
+            myfile.write('#Epoch, TrainLoss, ValTotalLoss, ValMSELoss, ValL1Loss\n')
+
+    def update_file(self):  # append loss info to file
+        with open(self.lossfile, "a") as myfile:
+            outstr = str(self.history['Epoch'][-1])+', {:10.5e}'.format(self.history['Train'][-1])+ \
+                ', {:10.5e}'.format(self.history['Val'][-1])
+            for otherloss in self.history['Val_'][-1]:
+                outstr += ', {:10.5e}'.format( otherloss )
+            myfile.write(outstr+'\n')
+
+    def update(self, epoch, loss, vloss, vlosses):
+        tloss, vloss = loss.data.cpu().numpy(), vloss.data.cpu().numpy()
+        #self.epoch_hist.append(epoch)
+        self.history['Epoch'].append(epoch)
+        self.history['Train'].append(tloss)
+        self.history['Val'].append(vloss)
+        vllist = []
+        for otherloss in vlosses:
+            vllist.append( otherloss.data.cpu().numpy() )
+        self.history['Val_'].append(vllist)
+
+        print('  val_loss: {:10.5e}'.format(self.history['Val'][-1]))
+        self.update_file()
 
     def is_best(self):   # only updates best_vloss when called; this is intentional
-        vloss_num = (self.vloss_hist[-1])[-1]
+        vloss_num = self.history['Val'][-1]  # most recent val loss
         if (vloss_num < self.best_vloss):
             self.best_vloss = vloss_num
             return True
@@ -95,7 +118,6 @@ def load_weights(model, filename='checkpoint.pth.tar'):
 
 def make_report(input_var, target_var, wave_form, loss_log, outfile=None, epoch=None, show_input=True,
     diff=False, mu_law=False):
-    mse =loss_log.loss_hist[-1]
 
 
     # --------------
@@ -105,20 +127,24 @@ def make_report(input_var, target_var, wave_form, loss_log, outfile=None, epoch=
     fig, panels = plt.subplots(num_signal_plots+2, figsize=(8.5,11),dpi=120 )
     lw    =   1    # line width
 
-
     # top panel: loss history
-    lhist = np.array(loss_log.loss_hist)
-    vlhist = np.array(loss_log.vloss_hist)
-    panels[0].loglog(lhist[:,0], lhist[:,1], label='Train', linewidth=lw)
-    panels[0].loglog(vlhist[:,0], vlhist[:,1], label='Val', linewidth=lw)
+    panels[0].set_title(loss_log.name+', Epoch '+str(loss_log.history['Epoch'][-1]))
+    ehist = loss_log.history['Epoch']
+    for key in ('Train','Val'):
+        panels[0].loglog(ehist, loss_log.history[key], label=key, linewidth=lw)
+
+    vlarr = np.array(loss_log.history['Val_'])
+    for i in range(vlarr.shape[1]):   # the components of the validation loss
+        panels[0].loglog(ehist, vlarr[:,i], label='Val['+str(i)+']', linewidth=lw)
+
     panels[0].set_ylabel('Loss')
     panels[0].set_xlabel('Epoch')
     panels[0].legend(loc=1)
     xmin = 1
-    if (lhist[-1,0] > 100):  # ignore the 1st 100 epochs (better when plotting with loglog scale)
+    if (ehist[-1] > 100):  # ignore the 1st 10 epochs (better when plotting with loglog scale)
         xmin = 10
     panels[0].set_xlim(left=xmin)
-    panels[0].set_ylim(top= vlhist[xmin,1] )
+    panels[0].set_ylim(top= loss_log.history['Val'][xmin] )
 
 
     if (input_var is None):  # exit
@@ -147,12 +173,7 @@ def make_report(input_var, target_var, wave_form, loss_log, outfile=None, epoch=
         if (2==signal_plot):
             panels[p].plot(wf, 'g-', label='Output', linewidth=lw)
         ampmax = 1.0 # 1.1*np.max(input_sig)
-        panels[p].set_ylim((-ampmax,ampmax))   # zoom in
-        if (0 == signal_plot):
-            outstr = 'MSE = '+str(mse)
-            if (None != epoch):
-                outstr += ', Epoch = '+str(epoch)
-            panels[p].text(0, 0.85*ampmax, outstr )
+        panels[p].set_ylim((-ampmax,ampmax))   # for consistency
         panels[p].legend(loc=1)
 
     # panels[3]: difference
@@ -164,6 +185,8 @@ def make_report(input_var, target_var, wave_form, loss_log, outfile=None, epoch=
     if (None == outfile):
         plt.show()
     else:
+        # why save to pdf and not png? because most pdf viewers auto-reload on file change :-)
+        #   (if you can find a good cross-platform image viewer that reloads, change the next line)
         plt.savefig(outfile+'.pdf')
         plt.close(fig)
 

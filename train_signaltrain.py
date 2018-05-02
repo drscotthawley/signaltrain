@@ -16,14 +16,15 @@ def calc_loss(Y_pred, Y_true, criteria, lambdas):
     #  Y_true: the target values
     #  criteria: an iterable of pytorch loss criteria, e.g. [torch.nn.MSELoss(), torch.nn.L1Loss()]
     #  lambdas:  a list of regularization parameters
-    assert len(criteria) == len(lambdas), "Must have the same number of criteria as lambdas"
+    numlosses = len(criteria)
+    assert numlosses == len(lambdas), "Must have the same number of criteria as lambdas"
 
-    for i in range(len(criteria)):
-        if (0==i):
-            loss = lambdas[i] * criteria[i](Y_pred, Y_true)
-        else:
-            loss += lambdas[i] * criteria[i](Y_pred, Y_true)
-    return loss
+    loss = 0
+    loss_list = [0]*numlosses   # report each of the loss terms (without the lambda multiplication included)
+    for i in range(numlosses):
+        loss_list[i] = lambdas[i] * criteria[i](Y_pred, Y_true)
+        loss += loss_list[i]
+    return loss, loss_list
 
 
 def train_model(model, optimizer, criteria, lambdas, X_train, Y_train, cmd_args, device,
@@ -79,7 +80,7 @@ def train_model(model, optimizer, criteria, lambdas, X_train, Y_train, cmd_args,
 
             # forward + backward + optimize
             wave_form = model(X_train_batch)
-            loss = calc_loss(wave_form, Y_train_batch, criteria, lambdas)
+            loss, losses = calc_loss(wave_form, Y_train_batch, criteria, lambdas)
             loss.backward(retain_graph=retain_graph)    # usually retain_graph=False unless we use an RNN
             optimizer.step()
 
@@ -92,19 +93,20 @@ def train_model(model, optimizer, criteria, lambdas, X_train, Y_train, cmd_args,
 
         if ((X_val is not None) and (Y_val is not None)):
             Ypred_val = model(X_val)
-            vloss = calc_loss(Ypred_val, Y_val, criteria, lambdas)
-            losslogger.update(epoch, loss, vloss)
+            vloss, vlosses = calc_loss(Ypred_val, Y_val, criteria, lambdas)
+            losslogger.update(epoch, loss, vloss, vlosses)
 
         if (epoch > start_epoch):
             if (0 == epoch % save_every) or (epoch >= max_epochs-1):
-                checkpoint_name = 'checkpoint.pth.tar'
+                checkpoint_name = losslogger.name + '/checkpoint.pth.tar'
                 st.utils.save_checkpoint({'epoch': epoch + 1, 'state_dict': model.state_dict(),
                                            'optimizer': optimizer.state_dict(),
                                            'losslogger': losslogger,
-                                           }, filename=checkpoint_name, best_only=True, is_best=losslogger.is_best() )
+                                           }, filename=checkpoint_name,
+                                           best_only=True, is_best=losslogger.is_best() )
 
             if (0 == epoch % plot_every):
-                outfile = 'progress'
+                outfile = losslogger.name+'/progress'
                 print("Writing progress report to ",outfile,'.*',sep="")
                 st.utils.make_report(X_val, Y_val, Ypred_val, losslogger, outfile=outfile, epoch=epoch, mu_law=mu_law)
                 st.models.model_viz(model,outfile)
@@ -157,12 +159,15 @@ def main():
                     help="Audio effect to try. Names are in signaltrain/audio.py. (default='ta' for time-alignment)")
     parser.add_argument('--epochs', default=10000, type=int, help="Number of iterations to train for")
     parser.add_argument('--fs', default=44100, type=int, help="Sample rate in Hertz")
-    parser.add_argument('--lambdas', default='1,0', type=str,
+    parser.add_argument('--lambdas', default='0.8,0.2', type=str,
                     help="Comma-separated list of regularization parameters, (MSELoss, L1Loss)")
     parser.add_argument('--length', default=length, type=int, help="Length of each audio signal (then cut up into chunks)")
     parser.add_argument('--lr', default=2e-4, type=float, help="Initial learning rate")
     parser.add_argument('--model', choices=['specsg','spectral','seq2seq','wavenet'], default='specsg', type=str,
-                    help="Name of model lto use")
+                    help="Type of model lto use")
+    parser.add_argument('--name', default='run', type=str, help="Name/tag for this run. Data/logging goes into dir with this name. ")
+    #TODO: decision: should it overwrite existing directory names, or create a new dir with, e.g. "_1" to avoid overwites?
+    #      Answer: neither. We append the time & date of the run start to the name of the run, so they're all unique
     parser.add_argument("--parallel", help="Run in data-parallel mode",action="store_true")
     parser.add_argument('--plot', default=5, type=int, help="Plot report every this many epochs")
     parser.add_argument('--save', default=20, type=int, help="Save checkpoint (if best) every this many epochs")
@@ -185,7 +190,7 @@ def main():
     print("args = ",args)
     sig_length = args.length
     fs = args.fs
-    lambdas = [int(x) for x in args.lambdas.split(',')] # turn comma-sep string into list of floats
+    lambdas = [float(x) for x in args.lambdas.split(',')] # turn comma-sep string into list of floats
 
     st.utils.print_choochoo()   # display program info
 
@@ -224,7 +229,7 @@ def main():
     #----------------------------------------------------------------
     #  Set additional training specs based on which model was chosen
     #----------------------------------------------------------------
-    losslogger = st.utils.LossLogger()
+    losslogger = st.utils.LossLogger(name=args.name)
 
     if (args.model != 'wavenet'):
         criteria = [torch.nn.MSELoss(), torch.nn.L1Loss()]
