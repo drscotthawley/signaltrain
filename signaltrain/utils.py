@@ -15,7 +15,7 @@ import datetime  # just to name the log files
 
 # simple progress bar for batch training. you can get a better ProgBar if you install something. ;-)
 # ripped off the style of Keras
-def progbar(epoch, max_epochs, batch_index, nbatches, loss, width=40, vloss=None):
+def progbar(epoch, max_epochs, batch_index, nbatches, loss, reg_term, width=40, vloss=None):
     base_str = '\rEpoch '+str(epoch)+' /'+str(max_epochs)+': '
     percent = (batch_index+1)/nbatches
     barlength = int(width * percent)
@@ -23,7 +23,8 @@ def progbar(epoch, max_epochs, batch_index, nbatches, loss, width=40, vloss=None
     leftover = width - barlength
     space =  ' '*leftover
     loss_num = np.asarray(loss.data.cpu().numpy())
-    print(base_str + bar + space+' loss: ' + '%.4f' % loss_num, end="")
+    reg_term_num = np.asarray(reg_term.data.cpu().numpy())
+    print(base_str + bar + space+' loss: ' + '%.4f' % loss_num + ' regl: ' '%.4f' % reg_term_num, end="")
     return
 
 
