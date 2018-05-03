@@ -4,6 +4,8 @@ __author__ = 'Scott H. Hawley'
 __copyright__ = 'Scott H. Hawley'
 
 """
+Draft. Just a demo for now.
+
 Visualization of model activations (and weights)
 -  in realtime, based on live microphone input - 'oscilloscope-like' display
 -  TODO: from audio file(s)
