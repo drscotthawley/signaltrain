@@ -22,8 +22,8 @@ def progbar(epoch, max_epochs, batch_index, nbatches, loss, width=40, vloss=None
     bar  = '='*barlength + '>'
     leftover = width - barlength
     space =  ' '*leftover
-    loss_num = loss.data.cpu().numpy()
-    print(base_str + bar + space+' loss: {:10.5e}'.format(loss_num), end="")
+    loss_num = np.asarray(loss.data.cpu().numpy())
+    print(base_str + bar + space+' loss: ' + '%.4f' % loss_num, end="")
     return
 
 
