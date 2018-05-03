@@ -79,11 +79,19 @@ def train_model(model, optimizer, criteria, lambdas, X_train, Y_train, cmd_args,
 
             # forward + backward + optimize
             wave_form = model(X_train_batch)
+            # A solution needs to be found in order to obtain a variable from the model here.
+            # Let's call it "z" for a moment.
+            # reg_term = z.norm(1) * 1e-4
+
             loss, losses = calc_loss(wave_form, Y_train_batch, criteria, lambdas)
+            reg_term = loss * 1e-4 # Dumb regularization for the moment
+            
+            # Apply regularization to loss
+            # loss += reg_term
             loss.backward(retain_graph=retain_graph)    # usually retain_graph=False unless we use an RNN
             optimizer.step()
 
-            st.utils.progbar(epoch, max_epochs, bi, nbatches, loss)  # show a progress bar through the epoch
+            st.utils.progbar(epoch, max_epochs, bi, nbatches, loss, reg_term)  # show a progress bar through the epoch
 
         if loss.data.cpu().numpy() < tol:
             break
