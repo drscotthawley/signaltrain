@@ -137,7 +137,7 @@ def scope(weights, buf_size=2000, fs=44100):
             gains[1] *= 1.1
             print("gains =",gains)
         elif ord('[') == key:  # left bracket
-            gains[1] += 0.9
+            gains[1] *= 0.9
             print("gains =",gains)
         elif ord('-') == key:     # minus sign
             trig_level += 0.001
