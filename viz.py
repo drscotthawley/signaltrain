@@ -11,7 +11,7 @@ Visualization of model activations (and weights)
 -  TODO: from audio file(s)
 
 Still under development.  Currently it just reads from the (live) default microphone,
-multiplies by one array of weights and shows the result.
+multiplies by one pre-fabriated array of weights and shows the result.
 Later I will try to load layers from a model, e.g. from checkpoint files
 
 Tested only on Mac OS X High Sierra with Python 3.6 (Anaconda)
@@ -23,7 +23,6 @@ import argparse
 import signaltrain as st
 import cv2                  # pip install opencv-python
 import soundcard as sc      # pip install git+https://github.com/bastibe/SoundCard
-#from matplotlib.pylab import cm   # color map, not working yet
 from scipy.ndimage.interpolation import shift  # used for oscilloscope trigger
 
 
@@ -38,12 +37,15 @@ max_amp_pixels = imHeight/5   # maximum amplitude in pixels
 # OpenCV BGR colors
 blue, green, cyan = (255,0,0), (0,255,0), (255,255,0)
 
-def draw_weights(weights, title="weights"):
-    img = np.clip(weights*255 ,-255,255).astype(np.uint8)              #scale
-    img = np.repeat(img[:,:,np.newaxis],3,axis=2)                # add color channels
-    #img = cm.jet(img).astype(np.uint8)
-    cv2.imshow(title, img)                      # show what we've got
 
+def draw_weights(weights, title="weights"):
+    img = np.clip(weights*255 ,-255,255).astype(np.uint8)    # scale
+    img = np.repeat(img[:,:,np.newaxis],3,axis=2)            # add color channels
+    img = cv2.applyColorMap(img, cv2.COLORMAP_JET)           # rainbow, blue=low, red=high
+    window = cv2.namedWindow(title,cv2.WINDOW_NORMAL)
+    cv2.imshow(title, img)                      # show what we've got
+    cv2.resizeWindow(title, int(imWidth/2),int(imWidth/2))   # zoom out (can use two-finger-scroll to zoom in)
+    #return window
 
 def draw_activations(screen, weights, mono_audio, xs, \
     title="activations (cyan=input, green=output)", gains=[3,0.3]):
@@ -61,7 +63,7 @@ def draw_activations(screen, weights, mono_audio, xs, \
 
     pts_out = np.array(list(zip(xs,ys_out)))    # pair up xs & ys for output
     cv2.polylines(screen,[pts_out],False,green)
-
+    window = cv2.namedWindow(title,cv2.WINDOW_NORMAL)   # allow the window containing the image to be resized
     cv2.imshow(title, screen.astype(np.uint8))
     return
 
@@ -87,6 +89,10 @@ def instructions():
     print("  [ : decrease output gain")
     print("  - : increase trigger level")
     print("  p : decrease trigger level")
+    print("      Two-finger scroll will zoom in")
+    print("")
+    print("Note: windows start out reduced in display size; can be resized at will")
+    print("      (Don't beleive the 'Zoom:%' display; it doesn't reflect proper array size)")
 
 
 # 'Oscilloscope' routine; audio buffer & sample rate; make the audio buffer a little bigger than 'needed',
