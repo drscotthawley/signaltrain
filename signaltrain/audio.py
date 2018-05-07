@@ -84,7 +84,7 @@ def ta_oneproc(input_sigs, target_sigs, chunk_size, event_len, num_events, stren
 
 
 # this runs in parallel, calling ta_oneproc many times to do multiple time-alignments
-def gen_timealign_pairs(chunk_size, num_chunks, num_events=1, parallel=True, strength=1.0):
+def gen_timealign_pairs(sig_length, num_events=1, parallel=True, strength=1.0):
     input_sigs = torch.zeros((num_chunks, chunk_size))
     target_sigs = input_sigs.clone()#  0.1*torch.randn((num_chunks, chunk_size))
     sig_length = chunk_size
@@ -159,7 +159,7 @@ def gen_input_sample(t, chooser=None):
         amp0 = (0.6*np.random.random()+0.3)*np.random.choice([-1,1])
         t0 = (2*np.random.random()-1)*0.3
         decay = 8*np.random.random()
-        freq = 300*np.random.random()
+        freq = 6400*np.random.random()
         x = amp0*np.exp(-decay * (t-t0) ) * np.sin(freq* (t-t0))
         x[np.where(t < t0)] = 0   # without this, it grow exponentially 'to the left'
         return x
@@ -197,7 +197,7 @@ def gen_input_sample(t, chooser=None):
         x = amp*(2*np.random.random(t.shape[0])-1)
         return x
     else:
-        x= 0.5*(make_input_signal(t)+make_input_signal(t)) # superposition of previous
+        x= 0.5*(gen_input_sample(t)+gen_input_sample(t)) # superposition of previous
         return x
     return np.copy(t)   # failsafe return just in case of typo above
 
@@ -225,7 +225,7 @@ def echo(x, delay_samples=1487, echoes=2, ratio=0.6, dtype=np.float32):
 
 
 # simple compressor, thanks to Eric Tarr
-def compressor(x, thresh=-35, ratio=3, attack=2000, dtype=np.float32):
+def compressor(x, thresh=-35, ratio=2, attack=4000, dtype=np.float32):
     fc = 1.0/(attack)               # this is like 1/attack time
     b, a = signal.butter(1, fc, analog=False)
     zi = signal.lfilter_zi(b, a)
@@ -351,26 +351,21 @@ def functions(x, f='id'):                # function to be learned
 
 
 # Chop'n'Stack!  Cuts up a signal into chunks and stacks them vertically. Pad with zeros
-def chopnstack(sig, chunk_size=8192):
-    # Note the chopnstack pair uses numpy instead of pytorch.  you can convert later with _from_numpy()
-    sig_len = len(sig)
-    rows = int(np.ceil(sig_len*1.0/chunk_size))          # number of chunks, round up
-    num_to_pad = rows*chunk_size - sig_len
-    sig = np.pad(sig,(0,num_to_pad),'constant')
-    return np.reshape(sig, (-1, chunk_size))
-    #buffer = np.zeros(n * size).astype(dtype)   # for zero-pad, embed in larger array
-    #buffer[0:sig_len] = sig
-    #return np.vstack(np.split(buffer, n))
+def chopnstack(sig, num_chunks, chunk_size=8192):
+    return np.reshape(sig,1, num_chunks, chunk_size)
+    return sig
+    ## Note the chopnstack pair uses numpy instead of pytorch.  you can convert later with _from_numpy()
+    #sig_len = len(sig)
+    #rows = int(np.ceil(sig_len*1.0/chunk_size))          # number of chunks, round up
+    #num_to_pad = rows*chunk_size - sig_len
+    #sig = np.pad(sig,(0,num_to_pad),'constant')
+    #return np.reshape(sig, (-1, chunk_size))
 
 # Inverse of Chop'n'Stack: takes vertical stack and produces 1-D signal
 #  fastest method is ravel  https://ipython-books.github.io/45-understanding-the-internals-of-numpy-to-avoid-unnecessary-array-copying/
 #      ravel is faster than flatten because flatten sometimes copies and ravel never copies
 def inv_chopnstack(stack, orig_len=None):
     return stack.ravel()
-    #if (None == orig_len):
-    #    return stack.reshape(-1)
-    #else:
-    #    return stack.reshape(-1)[0:orig_len]
 
 
 # mu laws from https://gist.github.com/lirnli/4282fcdfb383bb160cacf41d8c783c70
@@ -391,7 +386,7 @@ def decode_mu_law(y, mu=256):
    TODO: should probably try adding mu-law companding to see if that helps with SNR
    Inputs:
          sig_length:  is actually the totally length (in samples) of the the entire dataset,
-                     conceived as if it were just one file.  TODO: change this
+                     conceived as if it were just one file.
          device:     the pytorch device where the computation is performed
          chunk_size: chop up the signal into chunks of this length.
          effect:     string corresponding to a name of an audio effect
@@ -404,73 +399,83 @@ def decode_mu_law(y, mu=256):
         mu_law:      Set to true to apply mu-law encoding to input & target audio
         x_grad:      Normally the signal_var generated gets a gradient, but by setting this
                      to False you can save memory
+        fs:          sample rate
 ---------------------------------------------------------------------------------------'''
-def gen_audio(sig_length, device, chunk_size=8192, effect='ta', input_var=None, target_var=None, mu_law=False, x_grad=True):
+def gen_audio(sig_length, batch_size, device, chunk_size=8192, effect='ta', input_var=None, \
+    target_var=None, mu_law=False, x_grad=True, fs=44100):
     dtype=np.float32
 
     # Free up pytorch tensor memory usage before generating new data
     if (input_var is not None) and (target_var is not None):
         del input_var, target_var
 
-    num_chunks = int(sig_length / chunk_size)
-    if ('ps' == effect):    # pitch shift
-        fs = 44100.
-        num_waves = 20
-        amp_fac = 0.43
-        freq_fac = 0.31
-        input_stack, target_stack = gen_pitch_shifted_pairs(chunk_size, fs, amp_fac, freq_fac, num_waves, num_chunks)
 
-    elif ('ta' == effect):  # time align
-        input_stack, target_stack = gen_timealign_pairs(chunk_size, num_chunks, strength=0.5)
-    else:                   # other effects, where target can be generated from input instead of both together
-        # Generate input signal
-        clips_per_chunk = 4
-        clip_size = int( chunk_size / clips_per_chunk)
-        input_sig = np.zeros(sig_length).astype(dtype)       # allocate storage
-        #input_sig +=  (2*np.random.rand(sig_length)-1)*1e-6  # just a little noise to help it not be zero
-        t = np.linspace(0,1,num=clip_size).astype(dtype)
-        num_sample_clips = int(sig_length / clip_size)
-        for i in range(num_sample_clips):               #  go through each section of input and assign a waveform
-            start_ind = i * clip_size
-            sample_type = 2  # 'pluck'
-            input_sig[start_ind:start_ind + clip_size] = gen_input_sample(t,chooser=sample_type)
+    num_chunks = int(np.ceil(sig_length / chunk_size))
+    sig_length = num_chunks * chunk_size   # if requested size isn't integer multiple of chunk_size, we zero-pad
 
-        # normalize the input audio to have max amplitude of 0.5; large values are problematic for the input
-        # input_sig = 0.5 * input_sig / np.max(input_sig)  # but some plugins (e.g. comp) assume full scale
+    input_sig = np.zeros( (batch_size, sig_length) ).astype(dtype)       # allocate storage
+    target_sig = np.zeros( (batch_size, sig_length) ).astype(dtype)       # allocate storage
 
+    for bi in range(batch_size):  #  "bi" = "batch index"
+        # define new
+        if False and ('ps' == effect):    # pitch shift  TODO: this is broken for now
+            fs = 44100.
+            num_waves = 20
+            amp_fac = 0.43
+            freq_fac = 0.31
+            input_stack, target_stack = gen_pitch_shifted_pairs(chunk_size, fs, amp_fac, freq_fac, num_waves, num_chunks)
+        else:      # other effects, where target can be generated from input instead of both together
+            # Generate input signal via a series of samaple 'clips'
+            clip_size = 22050      # about     0.5 seconds
+            num_sample_clips = int(sig_length / clip_size)
+            t = np.linspace(0,1,num=clip_size).astype(dtype)
+            sample_type = 2 # 'pluck'
+            for i in range(num_sample_clips):        #  go through each section of input and assign a waveform
+                clip = gen_input_sample(t,chooser=sample_type)            # the audio clip to add
 
-        if ('delay' == effect):
-            input_sig *= 0.5    # for delay, just make it even smaller to avoid any clipping that may occur
+                start_ind = i * clip_size                                 # 'on the grid'
+                end_ind = min( start_ind + clip_size, sig_length )        # just don't go off the end of the buffer
+                this_clip_len = end_ind - start_ind       # length of this clip
+                target_sig[bi, start_ind:start_ind+this_clip_len] = clip[0:this_clip_len]  # this will get overwritten if we're not doing time alignment
 
-
-        #print("Plotting input_sig:")
-        #fig = plt.figure()
-        #plt.plot(input_sig[0:chunk_size])    # not the whole signal, just the first chunk
-        #plt.show()
-
-        # Apply the effect, whatever it is
-        target_sig = functions(input_sig, f=effect)
-
-        if mu_law:
-            input_sig = encode_mu_law(input_sig)
-            target_sig = encode_mu_law(target_sig)
-            dtype = np.long
-
-        # chop up the input & target signal
-        input_stack =  chopnstack(input_sig, chunk_size=chunk_size)
-        target_stack = chopnstack(target_sig, chunk_size=chunk_size)
-        input_stack = torch.from_numpy( input_stack )
-        target_stack = torch.from_numpy( target_stack )
-
-    input_var = Variable(input_stack, requires_grad=x_grad).to(device)
-    target_var = Variable(target_stack, requires_grad=False).to(device)
+                r_shift = int(0.3*clip_size* (2*np.random.rand()-1))          # random_shift, early or late
+                start_ind = start_ind + r_shift                               # 'on the grid'
+                if start_ind < 0:
+                    clip_start_ind = -start_ind
+                    clip_end_ind = start_ind + clip_size
+                    input_sig[bi, 0:clip_end_ind] = clip[0:clip_end_ind]  #     input is like target but shifted off the grid
+                else:
+                    end_ind = min( start_ind + clip_size, sig_length )        # just don't go off the end of the buffer
+                    this_clip_len = end_ind - start_ind       # length of this clip
+                    input_sig[bi, start_ind:start_ind+this_clip_len] = clip[0:this_clip_len]  # input is like target but shifted off the grid
 
 
-    #if torch.has_cudnn:
-    #    input_var = input_var.cuda()
-    #    target_var = target_var.cuda()
+            if ('delay' == effect):
+                input_sig *= 0.5    # for delay, just make it even smaller to avoid any clipping that may occur
 
-    #print("   Leaving gen_data with input_stack.size() = ",input_stack.size())
+            # Apply the effect, whatever it is except time alignment
+            if ('ta' != effect):
+                target_sig[bi] = functions(input_sig[bi], f=effect)
+
+            if mu_law:
+                input_sig = encode_mu_law(input_sig)
+                target_sig = encode_mu_law(target_sig)
+                dtype = np.long
+
+    # chop up the input & target signal(s)
+    input_sig.shape = (batch_size, num_chunks, chunk_size)
+    target_sig.shape = (batch_size, num_chunks, chunk_size)
+
+    print("input_sig.shape = ",input_sig.shape)
+
+    #input_stack =  chopnstack(input_sig, chunk_size=chunk_size)
+    #target_stack = chopnstack(target_sig, chunk_size=chunk_size)
+    #input_stack = torch.from_numpy( input_stack )
+    #target_stack = torch.from_numpy( target_stack )
+
+    input_var = Variable(torch.from_numpy(input_sig), requires_grad=x_grad).to(device)
+    target_var = Variable(torch.from_numpy(target_sig), requires_grad=False).to(device)
+
     return input_var, target_var
 
 
