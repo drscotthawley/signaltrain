@@ -11,17 +11,23 @@ import signaltrain as st
 #from tensorboardX import SummaryWriter
 
 
+def l1_penalty(var):
+    return torch.abs(var).mean()
+
+def l2_penalty(var):
+    return torch.sqrt(torch.pow(var, 2).mean())
+
 def calc_loss(Y_pred, Y_true, criteria, lambdas):
     #  Y_pred: the output from the network
     #  Y_true: the target values
     #  criteria: an iterable of pytorch loss criteria, e.g. [torch.nn.MSELoss(), torch.nn.L1Loss()]
     #  lambdas:  a list of regularization parameters
-    numlosses = len(criteria)
-    assert numlosses == len(lambdas), "Must have the same number of criteria as lambdas"
-    loss = 0
-    loss_list = [0]*numlosses   # report each of the loss terms (with the lambda multiplication included)
-    for i in range(numlosses):
-        loss_list[i] = lambdas[i] * criteria[i](Y_pred, Y_true)
+    numlambdas = len(lambdas)
+    loss_list = [0]*numlambdas   # report each of the loss terms (with the lambda multiplication included)
+    loss_list[0] = lambdas[0]*l1_penalty(Y_pred)
+    loss_list[1] = lambdas[1]*l2_penalty(Y_pred)
+    loss = criteria[0](Y_pred, Y_true)
+    for i in range(numlambdas):
         loss += loss_list[i]
     return loss, loss_list
 
@@ -60,7 +66,7 @@ def train_model(model, optimizer, criteria, lambdas, X_train, Y_train, cmd_args,
         # re-generate the input dataset occasionally, to encourage generality
         if (epoch > start_epoch) and (0 == epoch_iter % change_every):
             print("Preparing new data...")
-            X_train, Y_train = st.audio.gen_audio(sig_length, device, chunk_size=int(X_train.size()[-1]),
+            X_train, Y_train = st.audio.gen_audio(sig_length, batch_size, device, chunk_size=int(X_train.size()[-1]),
                 effect=effect, input_var=X_train, target_var=Y_train)
 
         # note: we print the Epoch after the new data just to keep the console display 'consistent'
@@ -92,7 +98,8 @@ def train_model(model, optimizer, criteria, lambdas, X_train, Y_train, cmd_args,
 
         if ((X_val is not None) and (Y_val is not None)):
             Ypred_val = model(X_val)
-            vloss, vlosses = calc_loss(Ypred_val, Y_val, criteria, lambdas)
+            # On the next line, lambdas=[0,0]: don't include regularization terms on val set evaluation
+            vloss, vlosses = calc_loss(Ypred_val, Y_val, criteria, [0,0])
             losslogger.update(epoch, loss, vloss, vlosses)
 
         if (epoch > start_epoch):
@@ -145,21 +152,22 @@ def main():
     #-------------------------------
     # Parse command line arguments
     #-------------------------------
-    chunk_max = 15000     # roughly the maximum model size that will fit in memory on Titan X Pascal GPU
+    chunk_max = 8192     # roughly the maximum model size that will fit in memory on Titan X Pascal GPU
                           # if you immediately get OOM errors, decrease chunk_max
-    batch_size = 500      # one big batch (e.g. 8000) runs faster per epoch, but smaller batches converge faster
-    length = chunk_max * 10000
+    batch_size = 200      # one big batch (e.g. 8000) runs faster per epoch, but smaller batches converge faster
+    fs = 44100
+    length = fs * 5     # 5 seconds of audio
 
     parser = argparse.ArgumentParser(description='trains SignalTrain effects mapper', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--batch', default=batch_size, type=int, help="Batch size")  # TODO: get batch_size>1 working
     parser.add_argument('--change', default=20, type=int, help="Changed data every this many epochs")
     parser.add_argument('--chunk', default=chunk_max, type=int, help="Length of each 'chunk' or window that input signal is chopped up into")
-    parser.add_argument('--effect', default='ta', type=str,
+    parser.add_argument('--effect', default='comp', type=str,
                     help="Audio effect to try. Names are in signaltrain/audio.py. (default='ta' for time-alignment)")
     parser.add_argument('--epochs', default=10000, type=int, help="Number of iterations to train for")
-    parser.add_argument('--fs', default=44100, type=int, help="Sample rate in Hertz")
-    parser.add_argument('--lambdas', default='0.8,0.2', type=str,
-                    help="Comma-separated list of regularization parameters, (MSELoss, L1Loss)")
+    parser.add_argument('--fs', default=fs, type=int, help="Sample rate in Hertz")
+    parser.add_argument('--lambdas', default='0.0,0.0', type=str,
+                    help="Comma-separated list of regularization penalty parameters, (L1, L2)")
     parser.add_argument('--length', default=length, type=int, help="Length of each audio signal (then cut up into chunks)")
     parser.add_argument('--lr', default=2e-4, type=float, help="Initial learning rate")
     parser.add_argument('--model', choices=['specsg','spectral','seq2seq','wavenet'], default='specsg', type=str,
@@ -168,7 +176,7 @@ def main():
     #TODO: decision: should it overwrite existing directory names, or create a new dir with, e.g. "_1" to avoid overwites?
     #      Answer: neither. We append the time & date of the run start to the name of the run, so they're all unique
     parser.add_argument("--parallel", help="Run in data-parallel mode",action="store_true")
-    parser.add_argument('--plot', default=5, type=int, help="Plot report every this many epochs")
+    parser.add_argument('--plot', default=20, type=int, help="Plot report every this many epochs")
     parser.add_argument('--save', default=20, type=int, help="Save checkpoint (if best) every this many epochs")
 
     # user can load a checkpoint file from a previous run: Either recall 'everything' (--resume) or just the weights (--init)
@@ -212,7 +220,7 @@ def main():
         model = st.models.Seq2Seq()
         retain_graph=True
     elif ('specsg' == args.model):
-        model = st.models.SpecShrinkGrow(chunk_size=args.chunk)
+        model = st.models.SpecShrinkGrow_cat(chunk_size=args.chunk)
     elif ('wavenet' == args.model):
         model = st.models.WaveNet()
         mu_law = True
@@ -231,7 +239,7 @@ def main():
     losslogger = st.utils.LossLogger(name=args.name)
 
     if (args.model != 'wavenet'):
-        criteria = [torch.nn.MSELoss(), torch.nn.L1Loss()]
+        criteria = [torch.nn.MSELoss()]
         optimizer = torch.optim.Adam( model.parameters(), lr=args.lr, eps=5e-6)    #,  amsgrad=True)
     else:
         raise ValueError("Sorry, model 'wavenet' isn't ready yet.")
@@ -264,9 +272,9 @@ def main():
     #------------------------------------------
     print("Peparing Training data...")
     dataset = None#  st.audio.AudioDataset(args.length, chunk_size=args.chunk, effect=args.effect)
-    X_train, Y_train = st.audio.gen_audio(sig_length, device, chunk_size=args.chunk, effect=args.effect, mu_law=mu_law)
+    X_train, Y_train = st.audio.gen_audio(sig_length, batch_size, device, chunk_size=args.chunk, effect=args.effect, mu_law=mu_law)
     print("Peparing Validation data...")
-    X_val, Y_val = st.audio.gen_audio(int(sig_length/5), device, chunk_size=args.chunk, effect=args.effect, mu_law=mu_law, x_grad=False)
+    X_val, Y_val = st.audio.gen_audio(sig_length, int(batch_size/5), device, chunk_size=args.chunk, effect=args.effect, mu_law=mu_law, x_grad=False)
 
     #--------------------
     # Call training Loop
