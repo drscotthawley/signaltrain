@@ -15,7 +15,7 @@ pip install -r requirements.txt
 ```
 Test it (with a small run, usuall I run much larger):
 ```
-./train_signaltrain.py --length 150000 --batch 10
+./train.py --length 75000 --batch 10
 ```
 
 
