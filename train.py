@@ -43,8 +43,6 @@ def train_model(model, optimizer, criterion, lambdas, train_gen, val_gen, cmd_ar
             train_gen.send(True)    # tell generator to read from a new file next time
             X_val, Y_val = next(val_gen)
 
-
-
         print('Epoch ', epoch,' /', max_epochs, sep="", end=":")
 
         # technically, batches are usually the '0' index; for now we're treating
@@ -53,7 +51,7 @@ def train_model(model, optimizer, criterion, lambdas, train_gen, val_gen, cmd_ar
         for batch_num in range(n_batches):  # inside this loop is "per batch"
 
             optimizer.zero_grad()                 # get ready to accumulate new gradients
-
+            
             # to avoid CUDA out of memory, only send batches to the GPU
             bgn, end = batch_num*batch_size, min( (batch_num+1)*batch_size, X_train.size()[1])
             X_batch = X_train[:,bgn:end,:].to(device)     # input signal,

@@ -14,7 +14,6 @@ from . import audio as st_audio
 import datetime  # just to name the log files
 
 
-
 def progbar(epoch, max_epochs, batch_index, nbatches, loss, reg_term=None,
     width=30, vloss=None):
     """
