@@ -8,120 +8,108 @@ import torch
 import argparse
 import signaltrain as st
 
-#from tensorboardX import SummaryWriter
 
-
-def l1_penalty(var):
-    return torch.abs(var).mean()
-
-def l2_penalty(var):
-    return torch.sqrt(torch.pow(var, 2).mean())
-
-def calc_loss(Y_pred, Y_true, criteria, lambdas):
+def calc_loss(Y_pred, Y_true, criterion):
     #  Y_pred: the output from the network
     #  Y_true: the target values
-    #  criteria: an iterable of pytorch loss criteria, e.g. [torch.nn.MSELoss(), torch.nn.L1Loss()]
-    #  lambdas:  a list of regularization parameters
-    numlambdas = len(lambdas)
-    loss_list = [0]*numlambdas   # report each of the loss terms (with the lambda multiplication included)
-    loss_list[0] = lambdas[0]*l1_penalty(Y_pred)
-    loss_list[1] = lambdas[1]*l2_penalty(Y_pred)
-    loss = criteria[0](Y_pred, Y_true)
-    for i in range(numlambdas):
-        loss += loss_list[i]
-    return loss, loss_list
+    #  criterion: an pytorch loss criterion, e.g. torch.nn.MSELoss()
+
+    # we may wish to slice the output, i.e. to ignore all but one time-slice
+    ypred = st.utils.slice_prediction(Y_pred, mode='center')  # 'center' can allow for non-causal inference
+    ytrue = st.utils.slice_prediction(Y_true, mode='center')
+
+    return criterion(ypred, ytrue)
 
 
-def train_model(model, optimizer, criteria, lambdas, X_train, Y_train, cmd_args, device,
-    X_val=None, Y_val=None, losslogger=None, start_epoch=1, fs=44100,
+def train_model(model, optimizer, criterion, lambdas, train_gen, val_gen, cmd_args, device,
+    losslogger=None, start_epoch=1, fs=44100,
     retain_graph=False, mu_law=False, tol=1e-14, dataset=None):
 
     # arguments from the command line
-    batch_size = cmd_args.batch
-    max_epochs = cmd_args.epochs
-    effect = cmd_args.effect
-    sig_length= cmd_args.length
-    save_every = cmd_args.save
-    change_every = cmd_args.change
-    plot_every = cmd_args.plot
-    model_name = cmd_args.model
-    chunk_size = cmd_args.chunk
-
-    print("X_train.size() =",X_train.size(),", batch_size =",batch_size)
-    if (0 != X_train.size()[0] % batch_size):
-        raise ValueError("X_train.size()[0] = ", X_train.size()[0],
-            ", must be an integer multiple of batch_size =",batch_size)
-    nbatches =  int(X_train.size()[0] / batch_size)
-    print(nbatches,"batches per epoch")
-
-    if (dataset is not None):
-        dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+    (batch_size, max_epochs, effect, sig_length) = (cmd_args.batch,cmd_args.epochs,cmd_args.effect,cmd_args.length)
+    (save_every, change_every, plot_every, model_name, chunk_size) = (cmd_args.save,cmd_args.change,cmd_args.plot,cmd_args.model,cmd_args.chunk)
 
     if (losslogger is None):
         losslogger = st.utils.LossLogger()
+    checkpoint_name = losslogger.name + '/checkpoint.pth.tar'
+    progress_outfile = losslogger.name+'/progress'
 
     for epoch_iter in range(1, 1 + max_epochs - start_epoch): # start w/ 1 so can plot log/log scale
         epoch = start_epoch + epoch_iter
 
-        # re-generate the input dataset occasionally, to encourage generality
-        if (epoch > start_epoch) and (0 == epoch_iter % change_every):
-            print("Preparing new data...")
-            X_train, Y_train = st.audio.gen_audio(sig_length, batch_size, device, chunk_size=int(X_train.size()[-1]),
-                effect=effect, input_var=X_train, target_var=Y_train)
+        # generate new data every now & then
+        if  (0 == epoch_iter % change_every) or (1==epoch_iter):
+            X_train, Y_train = next(train_gen)
+            train_gen.send(True)    # tell generator to read from a new file next time
+            X_val, Y_val = next(val_gen)
 
-        # note: we print the Epoch after the new data just to keep the console display 'consistent'
+
+
         print('Epoch ', epoch,' /', max_epochs, sep="", end=":")
 
-        # Batch training with dataloader.... not quite working yet
-        #for ibatch, data in enumerate(dataloader):   # batches
-        #    X_train_batch, X_train_batch =  data['input'], data['target']
-
-        for bi in range(nbatches):
-            bstart = bi * batch_size
-            X_train_batch = X_train[bstart : bstart + batch_size, :]
-            Y_train_batch = Y_train[bstart : bstart + batch_size, :]
+        # technically, batches are usually the '0' index; for now we're treating
+        # time steps as if they were batches, using index 1
+        n_batches = int(X_train.size()[1] / batch_size)
+        for batch_num in range(n_batches):  # inside this loop is "per batch"
 
             optimizer.zero_grad()                 # get ready to accumulate new gradients
 
-            # forward + backward + optimize
-            wave_form = model(X_train_batch)
-            loss, losses = calc_loss(wave_form, Y_train_batch, criteria, lambdas)
+            # to avoid CUDA out of memory, only send batches to the GPU
+            bgn, end = batch_num*batch_size, min( (batch_num+1)*batch_size, X_train.size()[1])
+            X_batch = X_train[:,bgn:end,:].to(device)     # input signal,
+            Y_batch = Y_train[:,bgn:end,:].to(device)     # target output
+            Y_pred, layers = model(X_batch)               # predicted output
+
+            # A solution needs to be found in order to obtain a variable from the model here.
+            # Let's call it "z" for a moment.
+            if len(layers) > 0:
+                z = layers[0]
+                reg_term = z.norm(1) * 1e-4
+
+            loss = calc_loss(Y_pred, Y_batch, criterion)
+            X_batch, Y_batch, Y_pred = X_batch.cpu(), Y_batch.cpu(), Y_pred.cpu()  # free up VRAM
+            st.utils.progbar(epoch, max_epochs, batch_num, n_batches, loss)  # show a progress bar through the epoch
+
+            #reg_term = loss * 1e-4 # Dumb regularization for the moment
+
+            # Apply regularization to loss
+            # loss += reg_term
+
+            # Perform optimization / gradient descent
             loss.backward(retain_graph=retain_graph)    # usually retain_graph=False unless we use an RNN
             optimizer.step()
-
-            st.utils.progbar(epoch, max_epochs, bi, nbatches, loss)  # show a progress bar through the epoch
 
         if loss.data.cpu().numpy() < tol:
             break
 
         #----- after full dataset run through (all batches),do various reporting & diagnostic things
 
+
         if ((X_val is not None) and (Y_val is not None)):
-            Ypred_val = model(X_val)
-            # On the next line, lambdas=[0,0]: don't include regularization terms on val set evaluation
-            vloss, vlosses = calc_loss(Ypred_val, Y_val, criteria, [0,0])
-            losslogger.update(epoch, loss, vloss, vlosses)
+            with torch.no_grad():           # not tracking gradients saves VRAM, bigtime
+                X_val, Y_val = X_val.to(device), Y_val.to(device)
+                Ypred_val, layers_pred = model(X_val)
+                vloss = calc_loss(Ypred_val, Y_val, criterion)
+                X_val, Y_val, Ypred_val = X_val.cpu(), Y_val.cpu(), Ypred_val.cpu()  # free up VRAM on the GPU
+
+            losslogger.update(epoch, loss, vloss)
 
         if (epoch > start_epoch):
             if (0 == epoch % save_every) or (epoch >= max_epochs-1):
-                checkpoint_name = losslogger.name + '/checkpoint.pth.tar'
                 st.utils.save_checkpoint({'epoch': epoch + 1, 'state_dict': model.state_dict(),
-                                           'optimizer': optimizer.state_dict(),
-                                           'losslogger': losslogger,
-                                           }, filename=checkpoint_name,
-                                           best_only=True, is_best=losslogger.is_best() )
+                    'optimizer': optimizer.state_dict(), 'losslogger': losslogger,},
+                    filename=checkpoint_name, best_only=True, is_best=losslogger.is_best() )
 
             if (0 == epoch % plot_every):
-                outfile = losslogger.name+'/progress'
-                print("Writing progress report to ",outfile,'.*',sep="")
-                st.utils.make_report(X_val, Y_val, Ypred_val, losslogger, outfile=outfile, epoch=epoch, mu_law=mu_law)
-                st.models.model_viz(model,outfile)
+                print("Writing progress report to ",progress_outfile,'.*',sep="")
+                st.utils.make_report(X_val, Y_val, Ypred_val, losslogger, outfile=progress_outfile, epoch=epoch, mu_law=mu_law)
+                st.models.model_viz(model,progress_outfile)
 
     return model
 
 
 # One additional model evaluation on Test or Val data
-def eval_model(model, criteria, lambdas, losslogger, sig_length, chunk_size, device, effect,
+def eval_model(model, criterion, lambdas, losslogger, sig_length, chunk_size, device, effect,
     fs=44100, X=None, Y=None, mu_law=False):
     # X_test=input, Y_test=target (optional_cal be regenerated)
     print("\n\nEvaluating model: loss_num=",end="")
@@ -129,8 +117,8 @@ def eval_model(model, criteria, lambdas, losslogger, sig_length, chunk_size, dev
         X_test, Y_test = st.audio.gen_audio(int(sig_length/5), device, chunk_size=chunk_size,
             effect=effect, input_var=X_train, target_var=Y_train)
         # st.audio.gen_audio(sig_length, chunk_size=chunk_size, effect=effect)
-    Y_pred = model(X)    # run network forward
-    loss = calc_loss(Y_pred, Y_test, criteria, lambdas)
+    Y_pred, layers_pred = model(X)    # run network forward
+    loss = calc_loss(Y_pred, Y_test, criterion, lambdas)
     loss_num = loss.data.cpu().numpy()
     print(loss_num)
     outfile = 'final'
@@ -145,16 +133,16 @@ def eval_model(model, criteria, lambdas, losslogger, sig_length, chunk_size, dev
 def main():
 
     # set random seeds: useful for ensuring similar initializations when testing different (hyper)parameters
-    torch.manual_seed(1)
-    np.random.seed(1)
+    torch.manual_seed(0)
+    np.random.seed(0)
 
 
     #-------------------------------
     # Parse command line arguments
     #-------------------------------
-    chunk_max = 8192     # roughly the maximum model size that will fit in memory on Titan X Pascal GPU
+    chunk_max = 15000     # roughly the maximum model size that will fit in memory on Titan X Pascal GPU
                           # if you immediately get OOM errors, decrease chunk_max
-    batch_size = 200      # one big batch (e.g. 8000) runs faster per epoch, but smaller batches converge faster
+    batch_size = 100      # one big batch (e.g. 8000) runs faster per epoch, but smaller batches converge faster
     fs = 44100
     length = fs * 5     # 5 seconds of audio
 
@@ -169,13 +157,13 @@ def main():
     parser.add_argument('--lambdas', default='0.0,0.0', type=str,
                     help="Comma-separated list of regularization penalty parameters, (L1, L2)")
     parser.add_argument('--length', default=length, type=int, help="Length of each audio signal (then cut up into chunks)")
-    parser.add_argument('--lr', default=2e-4, type=float, help="Initial learning rate")
-    parser.add_argument('--model', choices=['specsg','spectral','seq2seq','wavenet'], default='specsg', type=str,
-                    help="Type of model lto use")
-    parser.add_argument('--name', default='run', type=str, help="Name/tag for this run. Data/logging goes into dir with this name. ")
+    parser.add_argument('--lr', default=1e-6, type=float, help="Initial learning rate")
+    parser.add_argument('--model', choices=['specsg','spectral','seq2seq','wavenet','specfb','manyto1'],
+                    default='specsg', type=str, help="Choice of model lto use")
+    parser.add_argument('--name', default='run', type=str, help="Name/tag for this run. Logging goes into dir with this name. ")
     #TODO: decision: should it overwrite existing directory names, or create a new dir with, e.g. "_1" to avoid overwites?
     #      Answer: neither. We append the time & date of the run start to the name of the run, so they're all unique
-    parser.add_argument("--parallel", help="Run in data-parallel mode",action="store_true")
+    parser.add_argument("--parallel", help="Run in data-parallel mode",action="store_true")  # default=False
     parser.add_argument('--plot', default=20, type=int, help="Plot report every this many epochs")
     parser.add_argument('--save', default=20, type=int, help="Save checkpoint (if best) every this many epochs")
 
@@ -209,7 +197,7 @@ def main():
 
 
     #------------------------------------
-    # Set up model and training criteria
+    # Set up model and training criterion
     #------------------------------------
     retain_graph = False  # retain_graph only needed for RNN models. It's a memory hog
     mu_law = False # with mu-law companding, not only do we scale the floats into ints,
@@ -221,13 +209,18 @@ def main():
         retain_graph=True
     elif ('specsg' == args.model):
         model = st.models.SpecShrinkGrow_cat(chunk_size=args.chunk)
+    elif ('specfb' == args.model):
+        model = st.models.SpecFrontBack(chunk_size=args.chunk)
+    elif ('manyto1' == args.model):
+        model = st.models.FNNManyToOne(chunk_size=args.chunk)  # terrible
     elif ('wavenet' == args.model):
         model = st.models.WaveNet()
         mu_law = True
     else:
         model = st.models.SpecEncDec(ft_size=args.chunk)
 
-    # In my experiments, DataParallel runs no faster than single-GPU for the same
+    # Default is serial, not data-parallel execution. But --parallel flag will enable DP
+    #   In my experiments, DataParallel runs no faster than single-GPU for the same
     #   batch size.  It will allow you to run with larger batches, but...that's it.
     if args.parallel and (torch.cuda.device_count() > 1):
         print("Let's use", torch.cuda.device_count(), "GPUs!")
@@ -239,11 +232,11 @@ def main():
     losslogger = st.utils.LossLogger(name=args.name)
 
     if (args.model != 'wavenet'):
-        criteria = [torch.nn.MSELoss()]
+        criterion = torch.nn.MSELoss()
         optimizer = torch.optim.Adam( model.parameters(), lr=args.lr, eps=5e-6)    #,  amsgrad=True)
     else:
         raise ValueError("Sorry, model 'wavenet' isn't ready yet.")
-        criteria = [torch.nn.CrossEntropyLoss()]
+        criterion = torch.nn.CrossEntropyLoss()
         lambdas = [1.0]  # replace any args.lambdas value because there's only one loss in wavenet
         optimizer = torch.optim.Adam( model.parameters(), lr=0.01)
 
@@ -261,6 +254,7 @@ def main():
     # Once checkpoints are loaded (or not), CUDA-ify model if possible
     #------------------------------------------------------------------
     model = model.to(device)
+
     # For pytorch 0.4, manually move optimizer parts to GPU as well.  From https://github.com/pytorch/pytorch/issues/2830
     for state in optimizer.state.values():
         for k, v in state.items():
@@ -268,20 +262,17 @@ def main():
                 state[k] = v.to(device)
 
     #------------------------------------------
-    # Set up Training and Validation datasets
+    # Set up Training and Validation data generators
     #------------------------------------------
-    print("Peparing Training data...")
-    dataset = None#  st.audio.AudioDataset(args.length, chunk_size=args.chunk, effect=args.effect)
-    X_train, Y_train = st.audio.gen_audio(sig_length, batch_size, device, chunk_size=args.chunk, effect=args.effect, mu_law=mu_law)
-    print("Peparing Validation data...")
-    X_val, Y_val = st.audio.gen_audio(sig_length, int(batch_size/5), device, chunk_size=args.chunk, effect=args.effect, mu_law=mu_law, x_grad=False)
+    train_gen = st.audio.gen_audio(seq_size=int(args.chunk*2), chunk_size=args.chunk,path='Train',effect=args.effect)
+    val_gen = st.audio.gen_audio(seq_size=int(args.chunk*2), chunk_size=args.chunk,path='Val', effect=args.effect, random_every=False)
 
     #--------------------
     # Call training Loop
     #--------------------
-    model = train_model(model, optimizer, criteria, lambdas, X_train, Y_train, args, device,
-        X_val=X_val, Y_val=Y_val, start_epoch=start_epoch, losslogger=losslogger, fs=fs,
-        retain_graph=retain_graph, mu_law=mu_law, dataset=dataset)
+    model = train_model(model, optimizer, criterion, lambdas, train_gen, val_gen, args, device,
+        start_epoch=start_epoch, losslogger=losslogger, fs=fs,
+        retain_graph=retain_graph, mu_law=mu_law)
 
     #--------------------------------
     # Evaluate model on Test dataset
@@ -291,7 +282,6 @@ def main():
     return
 
 if __name__ == '__main__':
-
     main()
 
 # EOF
