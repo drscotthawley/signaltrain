@@ -9,174 +9,184 @@ from torch.autograd import Variable
 import os
 import sys
 from . import transforms as front_end
+from . import utils as st_utils
 
+# next 4 lines are only for modelviz
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
 
-class CNNAuto(nn.Module):   # 'convolutional autoencoder'
-    def __init__(self, finaldim):
-        super(CNNAuto, self).__init__()
-        self.io_channels = 1   # mono for now
-        self.feature_channels = 4  # chose this arbitrarily. nothing sacred about this number!
-        self.kernel_size = 7
-        self.pad = int(self.kernel_size/2)
-        self.scale_factor = 2
-        self.layer_in = nn.Sequential(     # generates feature_channels times more data
-            nn.Conv2d(self.io_channels, self.feature_channels, kernel_size=self.kernel_size, padding=self.pad),
-            nn.BatchNorm2d(self.feature_channels),
-            nn.LeakyReLU() )
-
-        self.layer_mid = nn.Sequential(    # keeps number of feature channels the same
-            nn.Conv2d(self.feature_channels, self.feature_channels, kernel_size=self.kernel_size, padding=self.pad),
-            nn.BatchNorm2d(self.feature_channels),
-            nn.LeakyReLU() )
-
-        # Pooling and Un-Pooling
-        self.layer_pool = nn.MaxPool2d(self.scale_factor, padding=(1,0), return_indices=True)
-        self.layer_unpool = nn.MaxUnpool2d(self.scale_factor, padding=(1,0) )
-
-        self.layer_dropout = nn.Dropout2d()
-
-        self.layer_out = nn.Sequential(     # combines feature channels back to original # of channels
-            nn.Conv2d(self.feature_channels, self.io_channels, kernel_size=self.kernel_size, padding=self.pad),
-            nn.BatchNorm2d(self.io_channels),
-            nn.LeakyReLU() )
-
-    def forward(self, x):
-        #print("input           x.size() = ",x.size())
-
-        y = self.layer_in(x)
-        save_size = y.size()
-        #print("after 1st conv  y.size() = ",y.size())
-        '''  pooling & growing is causing problems; disabled for now '''
-        y, indices = self.layer_pool(y)   #   \      /
-        #y = self.layer_mid(y)
-        #y = self.layer_pool(y)           #    \   /
-        #y = self.layer_mid(y)
-        #y = self.layer_dropout(y)
-        y = self.layer_mid(y)
-        #y = self.layer_dropout(y)
-        y = self.layer_mid(y)
-        y = self.layer_unpool(y, indices, output_size=save_size)      #    /   \
-        #print("after unpool    y.size() = ",y.size())
-
-        #y = self.layer_mid(y)
-        #y = self.layer_grow2(y)            #  /      \
-        y = self.layer_out(y)
-        #print("after last conv y.size() = ",y.size())
-
-        return y
-
-# TODO: Doesn't improve results.  Unused.
-class LowPassLayer(nn.Module):
-    '''
-    Description:
-    This is a tunable 'reverse sigmoid' soft mask, which will get multiplied (element-wise)
-    by the (vertical columns of) frequency spectrum, to serve as a low-pass filter.
-    It has two parameters: the central frequency (from 0...1, scales with size of input)
-    and a steepness parameter (-1.0=flat and 1.0=vertical)
-
-    Purpose:
-    Much of the loss-reduction in the final network output gets bound up in damping
-    high-frequency noise.  In theory we could let the network do
-    this eventually, but this layer is to help converge faster.
-
-    Notes:
-    Discussion & demo at ../docs/LowPassLayer.ipynb
-    Layer-writing guide at https://discuss.pytorch.org/t/how-to-define-a-new-layer-with-autograd/351
-    '''
-    def __init__(self, bins):
-        super(LowPassLayer, self).__init__()
-        self.eps = 0.1
-        self.bins = bins
-        self.m = nn.Parameter(torch.zeros(1)).cuda()      # steepness, tunable parameter  # .cuda() actually freezes the value
-        self.b = nn.Parameter(torch.zeros(1)).cuda()     # center, tunable parameter
-        if torch.has_cudnn:
-            self.x = Variable(torch.linspace(0, bins-1, steps=bins)).cuda()
-        else:
-            self.x = Variable(torch.linspace(0, bins-1, steps=bins))
-
-    def forward(self, in_stft):
-        mval, bval = self.m.data.cpu().numpy()[0],  self.b.data.cpu().numpy()[0]
-        print(' m={:10.5e}'.format(mval),' b={:10.5e}'.format(bval),sep="",end="")
-        m = self.m.expand_as(self.x)     # make it a 1-D vector of repeated numbers
-        b = self.b.expand_as(self.x)
-        mask = 1.0/(1+torch.exp( (1+m)/(1-m+self.eps) *10* (self.x /self.bins-(b+0.5)) )  )
-        return in_stft * mask          # elementwise multiplication
-
-
-# Just including here as an example. Unused.
-# From https://discuss.pytorch.org/t/how-to-define-a-new-layer-with-autograd/351/3
-class Gaussian(nn.Module):
-    def __init__(self):
-        super(Gaussian, self).__init__()
-        self.a = nn.Parameter(torch.zeros(1))
-        self.b = nn.Parameter(torch.zeros(1))
-        self.c = nn.Parameter(torch.zeros(1))
-
-    def forward(self, x):
-        # unfortunately we don't have automatic broadcasting yet
-        a = self.a.expand_as(x)
-        b = self.b.expand_as(x)
-        c = self.c.expand_as(x)
-        return a * torch.exp((x - b)^2 / c)
-
-
-# 'spectral encoder-decoder'
-class SpecEncDec(nn.Module):
-    def __init__(self, ft_size=1024):
-        super(SpecEncDec, self).__init__()
-        self.encoder = front_end.FNNAnalysis(ft_size=ft_size)   # gives matrix mult. size mismatches
-        self.decoder = front_end.FNNSynthesis(ft_size=ft_size)
-
-        self.full_dim = int(ft_size/2 +1)
-        self.dense = nn.Linear(self.full_dim, self.full_dim)
-
-        self.act = nn.LeakyReLU()   # Tried ReLU, ELU, SELU; Leaky works best.  SELU yields instability
-
-    def forward(self, input_var):
-        y = input_var.unsqueeze(0)   # hack to deal with batch size of 1 right now; TODO: remove this
-        real, imag = self.encoder(y)
-        real, imag = self.act( self.dense(real) ), self.act( self.dense(imag) )
-        real, imag = self.act( self.dense(real) ), self.act( self.dense(imag) )
-        real, imag = self.act( self.dense(real) ), self.act( self.dense(imag) )
-        real, imag = self.act( self.dense(real) ), self.act( self.dense(imag) )
-        y = self.decoder(real, imag)
-        y = y.squeeze(0)
-        return y
-
-# little hack for making sure grid sizes can split data evenly between 2 GPUs
 def nearest_even(x):
+    """hack for making sure grid sizes can split data evenly between 2 GPUs"""
     y = int(x)
     if (0 == y % 2):
         return y
     else:
         return y+1
 
-class SpecShrinkGrow_cat(nn.Module):  # spectral bottleneck encoder
-    # This model first projects the input audio to smaller sizes, using some 'dense' layers,
-    #  Then calls the FNN analysis routine, does show shinking & growing, calls FNNSynthesis,
-    #  and then expands back out to the original audio size.
-    #  Two skip connections are present; more or fewer produced worse results that this.
-    #  For a diagram of thi smodel, see ../docs/model_diagram.png
-    #
+
+class SpecShrinkGrow_cat(nn.Module):
+    """
+    Spectral bottleneck encoder, cat real & imag parts together
+
+    SHH: This version is my current preference
+
+    This model first projects the input audio to smaller sizes, using some 'dense' layers,
+    Then calls the FNN analysis routine, does show shinking & growing, calls FNNSynthesis,
+    and then expands back out to the original audio size.
+    Two skip connections are present; more or fewer produced worse results that this.
+    For a diagram of thi smodel, see ../docs/model_diagram.png
+    """
     def __init__(self, chunk_size=1024):
-        super(SpecShrinkGrow, self).__init__()
+        super(SpecShrinkGrow_cat, self).__init__()
+
+        ratio = 3   # Reduction ratio. 3 works about as well as 2.  4 seems to be too much
+                    # one problem with ratio of 3 is it can produce odd sizes that don't split the data evenly between two GPUs
+        self.mid_size = nearest_even(chunk_size/ratio)
+        ft_size = nearest_even(self.mid_size /ratio)  # previously used ft_size = chunk_size, but that was limiting GPU memory usage
+
+        # these shrink & grow routines are just to try to decrease encoder-decoder GPU memory usage
+        self.front_shrink = nn.Linear(chunk_size, self.mid_size, bias=False)
+        self.front_shrink2 = nn.Linear(self.mid_size, ft_size, bias=False)
+        self.back_grow2    = nn.Linear(ft_size, self.mid_size, bias=False)
+        self.back_grow    = nn.Linear(self.mid_size, chunk_size, bias=False)
+
+        # the "FFT" routines
+        self.encoder = front_end.FNNAnalysis(ft_size=ft_size)   # gives matrix mult. size mismatches
+        self.decoder = front_end.FNNSynthesis(ft_size=ft_size)#, random_init=True)  #  random_init=True gives me better Val scores
+
+        ft_out_dim  = int(ft_size/2+1)   # this is the size of the output from the FNNAnalysis routine
+        self.full_dim = 2*ft_out_dim          # we will cat the real and imag halves together
+
+        # define some more size variables for shrinking & growing sizes in between encoder & decoder
+        self.med_dim   = nearest_even(self.full_dim / ratio)
+        small_dim = nearest_even(self.med_dim / ratio)
+
+
+        self.shrink  = nn.Linear(self.full_dim,  self.med_dim, bias=False)
+        self.shrink2 = nn.Linear(self.med_dim,   small_dim, bias=False)
+        self.grow2   = nn.Linear(small_dim, self.med_dim, bias=False)
+        self.grow    = nn.Linear(self.med_dim,   self.full_dim, bias=False)
+
+        # replacing these dense layers for skip connections with simple addition to save memory
+        #self.mapskip  = nn.Linear(2*self.full_dim,  self.full_dim, bias=False)  # maps concatenated skip connection to 'regular' size
+        #self.mapskip2 = nn.Linear(2*self.med_dim,   self.med_dim, bias=False)
+        #self.mapbigskip = nn.Linear(2*self.mid_size,   self.mid_size, bias=False)
+        #self.finalskip = nn.Linear(2*chunk_size,   chunk_size, bias=False)  # does not fit in CUDA memory
+
+        self.act     = nn.LeakyReLU()   # Tried ReLU, ELU, SELU; Leaky seems to work best.  SELU yields instability
+        #self.initialize()  # not calling because replaced cat skip connections with sums
+
+    #def initialize(self):
+    #    # add identities to default init for mapping skip connections, to let signals "pass through"
+    #    init_skip = np.concatenate( (np.eye(self.full_dim), np.eye(self.full_dim)), axis=1).astype(np.float32)
+    #    init_skip2 = np.concatenate( (np.eye(self.med_dim), np.eye(self.med_dim)), axis=1).astype(np.float32)
+    #    self.mapskip.weight.data += torch.from_numpy(init_skip)
+    #    self.mapskip2.weight.data += torch.from_numpy(init_skip2)
+    #
+    #    init_big = np.concatenate( (np.eye(self.mid_size), np.eye(self.mid_size)), axis=1).astype(np.float32)
+    #    self.mapbigskip.weight.data += torch.from_numpy(init_big)
+
+
+    def forward(self, input_var, skips=(2,3,4)):    # my trials indicate skips=(2,3) works best. (1,2,3) has more noise, (3) converges slower, no skips converges slowest
+        y_s = self.act( self.front_shrink(input_var) )     # _s to prepare for skip connection "skips=3"
+        y = self.act( self.front_shrink2(y_s) )
+        real, imag = self.encoder(y)
+        ricat_s   = torch.cat((real, imag), 2)                # 'cat' real & imag together; _s for a skip_later
+        ricat  = self.act( self.shrink(ricat_s) )        # _s2 for other skip connection  skips=1
+        ricat  = self.act( self.shrink2(ricat) )
+
+        # ----- here is the 'middle of the hourglass';  from here we expand
+
+        ricat     = self.act( self.grow2(ricat) )
+        #if (1 in skips):  # this one has no discernable effect; but does yield more noise
+        #    #ricat = self.mapskip2(torch.cat((ricat, ricat_s2), 2)) # make skip connection
+        #    ricat += ricat_s2
+
+        ricat     = self.act( self.grow(ricat) )
+        if (2 in skips):
+            ricat += ricat_s  # skip connection; simple addition uses less memory than map(torch.cat)
+            #ricat = self.mapskip(torch.cat((ricat, ricat_s), 2))   # make skip connection
+
+        # split the cat-ed real & imag back up [arbitrarily] ;
+        uncat = torch.chunk( ricat, 2, dim=2)
+        # TODO: actually, this probably sets imag to the value of the skip connection we just made
+
+        y = self.decoder(uncat[0],uncat[1])
+        y = self.act(self.back_grow2(y))
+        if (3 in skips):
+            #y = self.mapbigskip( torch.cat((y, y_s), 2)  )
+            y += y_s
+        y = self.back_grow(y)
+        if (4 in skips):  # for final skip we simply add (WaveNet does this). cat is too memory-intensive for large audio clips
+            y += input_var
+
+        layers = []# (ricat)     # additional container to report intermediary activations & more
+        return y, layers
+
+
+
+class FNNManyToOne(nn.Module):
+    """
+    this seems similar to our above models, and yet it hardly learns at all??
+
+    simple shrinking multi-layer FNN
+    this takes an stacked set of sequental windows and predicts a single value (the last one)
+    it is a many-to-one model
+    """
+    def __init__(self, chunk_size=8192, nlayers=13, ratio=2, mode='center'):
+        super(FNNManyToOne, self).__init__()
+        self.nlayers = nlayers
+        self.slicemode = mode
+        self.sizes = np.array(chunk_size/np.power(2,range(nlayers))).astype(np.int)
+        self.shrinks = nn.ModuleList([nn.Linear( int(self.sizes[l]), int(self.sizes[l+1]), bias=False)
+                                 for l in range(nlayers-1)] )
+        self.finallayer = nn.Linear(self.sizes[-1],1)
+        self.act     = nn.LeakyReLU()
+
+    def forward(self, input_var, skips=(2,3,4)):    # my trials indicate skips=(2,3) works best. (1,2,3) has more noise, (3) converges slower, no skips converges slowest
+        y = input_var
+        layers = []
+        for l in np.arange(self.nlayers-1):
+            y = self.act( self.shrinks[l](y) )
+            layers.append(y)
+        y = self.finallayer(y)
+        y += st_utils.slice_prediction(input_var,mode=self.slicemode).unsqueeze(2)  # simple skip connection
+        layers.append(y)
+        return y, layers
+
+
+
+class SpecShrinkGrow_cat3(nn.Module):
+    """
+    same as above but w/ three front- and back- shrink & grow layers instead 2
+
+    This model first projects the input audio to smaller sizes, using some 'dense' layers,
+    Then calls the FNN analysis routine, does show shinking & growing, calls FNNSynthesis,
+    and then expands back out to the original audio size.
+    Two skip connections are present; more or fewer produced worse results that this.
+    For a diagram of thi smodel, see ../docs/model_diagram.png
+    """
+    def __init__(self, chunk_size=1024):
+        super(SpecShrinkGrow_cat, self).__init__()
 
 
         ratio = 3   # Reduction ratio. 3 works about as well as 2.  4 seems to be too much
                     # one problem with ratio of 3 is it can produce odd sizes that don't split the data evenly between two GPUs
-        mid_size = nearest_even(chunk_size/ratio)
-        ft_size = nearest_even(mid_size /ratio)  # previously used ft_size = chunk_size, but that was limiting GPU memory usage
+        size_front_shrink = int(chunk_size/ratio)
+        size_front_shrink2 = int(size_front_shrink/ratio)
+        ft_size = int(size_front_shrink2/ratio)
 
         # these shrink & grow routines are just to try to decrease encoder-decoder GPU memory usage
-        self.front_shrink = nn.Linear(chunk_size, mid_size, bias=False)
-        self.front_shrink2 = nn.Linear(mid_size, ft_size, bias=False)
-        self.back_grow2    = nn.Linear(ft_size, mid_size, bias=False)
-        self.back_grow    = nn.Linear(mid_size, chunk_size, bias=False)
+        # and allow for a larger 'reach', temporally
+        self.front_shrink  = nn.Linear(chunk_size, size_front_shrink, bias=False)
+        self.front_shrink2 = nn.Linear(size_front_shrink, size_front_shrink2, bias=False)
+        self.front_shrink3 = nn.Linear(size_front_shrink2, ft_size, bias=False)
+        self.back_grow3    = nn.Linear(ft_size, size_front_shrink2, bias=False)
+        self.back_grow2    = nn.Linear(size_front_shrink2, size_front_shrink, bias=False)
+        self.back_grow     = nn.Linear(size_front_shrink, chunk_size, bias=False)
 
         # the "FFT" routines
         self.encoder = front_end.FNNAnalysis(ft_size=ft_size)   # gives matrix mult. size mismatches
@@ -190,8 +200,6 @@ class SpecShrinkGrow_cat(nn.Module):  # spectral bottleneck encoder
         med_dim   = nearest_even(full_dim / ratio)
         small_dim = nearest_even(med_dim / ratio)
 
-        #print("chunk_size, mid_size, ft_size = ",chunk_size, mid_size, ft_size)
-        #print("full_dim, med_dim, small_dim = ",full_dim, med_dim, small_dim)
 
         self.shrink  = nn.Linear(full_dim,  med_dim, bias=False)
         self.shrink2 = nn.Linear(med_dim,   small_dim, bias=False)
@@ -201,65 +209,60 @@ class SpecShrinkGrow_cat(nn.Module):  # spectral bottleneck encoder
 
         self.mapskip  = nn.Linear(2*full_dim,  full_dim, bias=False)  # maps concatenated skip connection to 'regular' size
         self.mapskip2 = nn.Linear(2*med_dim,   med_dim, bias=False)
-        self.bigskip = nn.Linear(2*mid_size,   mid_size, bias=False)
+        self.mapbigskip = nn.Linear(2*size_front_shrink2,   size_front_shrink2, bias=False)
         #self.finalskip = nn.Linear(2*chunk_size,   chunk_size, bias=False)  # does not fit in CUDA memory
 
         self.act     = nn.LeakyReLU()   # Tried ReLU, ELU, SELU; Leaky seems to work best.  SELU yields instability
 
     def forward(self, input_var, skips=(2,3,4)):    # my trials indicate skips=(2,3) works best. (1,2,3) has more noise, (3) converges slower, no skips converges slowest
         y_orig = input_var
-        y_s = self.act( self.front_shrink(y_orig) )     # _s to prepare for skip connection "skips=3"
-        y = self.act( self.front_shrink2(y_s) )
-        y = y.unsqueeze(0)   # hack to deal with batch size of 1 right now; TODO: remove this
+        y = self.act(self.front_shrink(y_orig))
+        y_s = self.act( self.front_shrink2(y) )   # _s to prepare for skip connection "skips=3"
+        y = self.act( self.front_shrink3(y_s) )
         real, imag = self.encoder(y)
-        #print("real.size() = ",real.size())
-        ricat_s = torch.cat((real, imag), 2)                # 'cat' real & imag together; _s for a skip_later
-        #print("ricat_s.size() = ",ricat_s.size())
+        ricat_s   = torch.cat((real, imag), 2)                # 'cat' real & imag together; _s for a skip_later
         ricat_s2  = self.act( self.shrink(ricat_s) )        # _s2 for other skip connection  skips=1
-
-        ricat = self.act( self.shrink2(ricat_s2) )
-
+        ricat     = self.act( self.shrink2(ricat_s2) )
 
         # ----- here is the 'middle of the hourglass';  from here we expand
 
-
-        ricat = self.act( self.grow2(ricat) )
-
+        ricat     = self.act( self.grow2(ricat) )
         if (1 in skips):  # this one has no discernable effect; but does yield more noise
             ricat = self.mapskip2(torch.cat((ricat, ricat_s2), 2)) # make skip connection
 
-        ricat = self.act( self.grow(ricat) )
-
+        ricat     = self.act( self.grow(ricat) )
         if (2 in skips):
             ricat = self.mapskip(torch.cat((ricat, ricat_s), 2))   # make skip connection
 
         uncat = torch.chunk( ricat, 2, dim=2)       # split the cat-ed real & imag back up [arbitrarily] ;
-        # TODO: actually, this probably sets imag to the value of the skip connection we just made
-        #print("len(uncat) = ",len(uncat))
+
+        # TODO: actually, this next line probably sets imag to the value of the skip connection we just made
         real, imag = uncat[0],uncat[1]
-
         y = self.decoder(real, imag)
-        y = y.squeeze(0)
-
-        y = self.act(self.back_grow2(y))
+        y = self.act(self.back_grow3(y))
         if (3 in skips):
-            y = self.bigskip( torch.cat((y, y_s), 1) )
+            y = self.mapbigskip( torch.cat((y, y_s), 2)  )
+        y = self.back_grow2(y)
         y = self.back_grow(y)
         #if (4 in skips):
-        #    y = self.finalskip( torch.cat((y, y_orig), 1) )  # too memory-intensive for large audio clips
-        return y
+        #    y = self.finalskip( torch.cat((y, y_orig), 1) )  # too memory-intensive for large chunk_size
+
+        layers = (ricat)     # additional container to report intermediary activations & more
+        return y, layers
 
 
-class SpecShrinkGrow(nn.Module):  # spectral bottleneck encoder
-    # This model first projects the input audio to smaller sizes, using some 'dense' layers,
-    #  Then calls the FNN analysis routine, does show shinking & growing, calls FNNSynthesis,
-    #  and then expands back out to the original audio size.
-    #  Two skip connections are present; more or fewer produced worse results that this.
-    #  For a diagram of thi smodel, see ../docs/model_diagram.png
-    #
+class SpecShrinkGrow(nn.Module):
+    """
+    'original' spectral bottleneck encoder
+
+    This model first projects the input audio to smaller sizes, using some 'dense' layers,
+    Then calls the FNN analysis routine, does show shinking & growing, calls FNNSynthesis,
+    and then expands back out to the original audio size.
+    Two skip connections are present; more or fewer produced worse results that this.
+    For a diagram of thi smodel, see ../docs/model_diagram.png
+    """
     def __init__(self, chunk_size=1024):
         super(SpecShrinkGrow, self).__init__()
-
 
         ratio = 3   # Reduction ratio. 3 works about as well as 2.  4 seems to be too much
                     # one problem with ratio of 3 is it can produce odd sizes that don't split the data evenly between two GPUs
@@ -281,8 +284,8 @@ class SpecShrinkGrow(nn.Module):  # spectral bottleneck encoder
         med_dim   = nearest_even(full_dim / ratio)
         small_dim = nearest_even(med_dim / ratio)
 
-        #print("chunk_size, mid_size, ft_size = ",chunk_size, mid_size, ft_size)
-        #print("full_dim, med_dim, small_dim = ",full_dim, med_dim, small_dim)
+        print("chunk_size, mid_size, ft_size = ",chunk_size, mid_size, ft_size)
+        print("full_dim, med_dim, small_dim = ",full_dim, med_dim, small_dim)
 
         self.shrink_r  = nn.Linear(full_dim,  med_dim, bias=False)
         self.shrink2_r = nn.Linear(med_dim,   small_dim, bias=False)
@@ -313,7 +316,6 @@ class SpecShrinkGrow(nn.Module):  # spectral bottleneck encoder
         y_s = self.act( self.front_shrink(y_orig) )     # _s to prepare for skip connection "skips=3"
         y = self.act( self.front_shrink2(y_s) )
 
-        y = y.unsqueeze(0)   # hack to deal with batch size of 1 right now; TODO: remove this
         real_s, imag_s = self.encoder(y)                                                        # _s to prep for skip connection skips=2
         real_s2, imag_s2 = self.act( self.shrink_r(real_s) ),  self.act( self.shrink_i(imag_s) )    # _s2 for other skip connection  skips=1
 
@@ -329,147 +331,89 @@ class SpecShrinkGrow(nn.Module):  # spectral bottleneck encoder
             real, imag = self.mapskip_r(torch.cat((real, real_s), 2)), self.mapskip_i(torch.cat((imag, imag_s), 2))   # make skip connection
 
         y = self.decoder(real, imag)
-        y = y.squeeze(0)
         y = self.act(self.back_grow2(y))
         if (3 in skips):
-            y = self.bigskip( torch.cat((y, y_s), 1) )
+            y = self.bigskip( torch.cat((y, y_s), 2) )
         y = self.back_grow(y)
         #if (4 in skips):
         #    y = self.finalskip( torch.cat((y, y_orig), 1) )  # too memory-intensive for large audio clips
-        return y
 
-# reuses same weights for real & imag
-class SpecShrinkGrow_reuse(nn.Module):  # spectral bottleneck encoder
-    # This model first projects the input audio to smaller sizes, using some 'dense' layers,
-    #  Then calls the FNN analysis routine, does show shinking & growing, calls FNNSynthesis,
-    #  and then expands back out to the original audio size.
-    #  Two skip connections are present; more or fewer produced worse results that this.
-    #  For a diagram of thi smodel, see ../docs/model_diagram.png
-    #
+        layers = ()     # additional container variable that could be used to report intermediate values
+        return y, layers
+
+
+
+
+class SpecFrontBack(nn.Module):
+    """
+    This calls SM's front_end routines with no temporal pre-processing
+
+    For the compressor effect, this results in output that does not match the
+    target output, rather the ouput looks like the input signal reduced in
+    amplitude so that it 'splits the difference' between input & target
+    """
     def __init__(self, chunk_size=1024):
-        super(SpecShrinkGrow, self).__init__()
-
-
-        ratio = 3   # Reduction ratio. 3 works about as well as 2.  4 seems to be too much
-                    # one problem with ratio of 3 is it can produce odd sizes that don't split the data evenly between two GPUs
-        mid_size = nearest_even(chunk_size/ratio)
-        ft_size = nearest_even(mid_size /ratio)  # previously used ft_size = chunk_size, but that was limiting GPU memory usage
-
-        # these shrink & grow routines are just to try to decrease encoder-decoder GPU memory usage
-        self.front_shrink = nn.Linear(chunk_size, mid_size, bias=False)
-        self.front_shrink2 = nn.Linear(mid_size, ft_size, bias=False)
-        self.back_grow2    = nn.Linear(ft_size, mid_size, bias=False)
-        self.back_grow    = nn.Linear(mid_size, chunk_size, bias=False)
+        # Note: Maximum chunk_size for this model is around 8192 on Titan X GPU
+        super(SpecFrontBack, self).__init__()
 
         # the "FFT" routines
-        self.encoder = front_end.FNNAnalysis(ft_size=ft_size)   # gives matrix mult. size mismatches
-        self.decoder = front_end.FNNSynthesis(ft_size=ft_size)#, random_init=True)  #  random_init=True gives me better Val scores
+        self.encoder = front_end.FNNAnalysis(ft_size=chunk_size)   # gives matrix mult. size mismatches
+        self.decoder = front_end.FNNSynthesis(ft_size=chunk_size)#, random_init=True)  #  random_init=True gives me better Val scores
 
-        # define some more size variables for shrinking & growing sizes in between encoder & decoder
-        full_dim  = int(ft_size/2+1)   # this is the size of the output from the FNNAnalysis routine
-        med_dim   = nearest_even(full_dim / ratio)
-        small_dim = nearest_even(med_dim / ratio)
-
-        #print("chunk_size, mid_size, ft_size = ",chunk_size, mid_size, ft_size)
-        #print("full_dim, med_dim, small_dim = ",full_dim, med_dim, small_dim)
+        full_dim = (chunk_size+2)   # full size of 'catted' real & imag parts
+        ratio = 3                   # factor of 3 works well, 4 is too much
+        med_dim = int(full_dim/ratio)
+        small_dim = int(med_dim/ratio)
 
         self.shrink  = nn.Linear(full_dim,  med_dim, bias=False)
-        self.shrink2 = nn.Linear(med_dim,   small_dim, bias=False)
-        #self.dense = nn.Linear(self.small_dim, self.small_dim, bias=False)  # not needed
-        self.grow2   = nn.Linear(small_dim, med_dim, bias=False)
-        self.grow    = nn.Linear(med_dim,   full_dim, bias=False)
+        self.shrink2  = nn.Linear(med_dim,  small_dim, bias=False)
+        self.grow2  = nn.Linear( small_dim, med_dim, bias=False)    # matches shrink2
+        self.grow  = nn.Linear( med_dim, full_dim, bias=False)      # matches shrink
 
-        self.mapskip  = nn.Linear(2*full_dim,  full_dim, bias=False)  # maps concatenated skip connection to 'regular' size
-        self.mapskip2 = nn.Linear(2*med_dim,   med_dim, bias=False)
-        self.bigskip = nn.Linear(2*mid_size,   mid_size, bias=False)
-        #self.finalskip = nn.Linear(2*chunk_size,   chunk_size, bias=False)  # does not fit in CUDA memory
+        self.mapskip = nn.Linear( chunk_size*2, chunk_size, bias=False)  # when we cat a skip connection in, we need to reduce to 'normal size'
 
-        self.act     = nn.LeakyReLU()   # Tried ReLU, ELU, SELU; Leaky seems to work best.  SELU yields instability
-
-    def forward(self, input_var, skips=(2,3,4)):    # my trials indicate skips=(2,3) works best. (1,2,3) has more noise, (3) converges slower, no skips converges slowest
-        y_orig = input_var
-        y_s = self.act( self.front_shrink(y_orig) )     # _s to prepare for skip connection "skips=3"
-        y = self.act( self.front_shrink2(y_s) )
-
-        y = y.unsqueeze(0)   # hack to deal with batch size of 1 right now; TODO: remove this
-        real_s, imag_s = self.encoder(y)                                                        # _s to prep for skip connection skips=2
-        real_s2, imag_s2 = self.act( self.shrink(real_s) ),  self.act( self.shrink(imag_s) )    # _s2 for other skip connection  skips=1
-
-        real, imag = self.act( self.shrink2(real_s2) ), self.act( self.shrink2(imag_s2) )
-        real, imag = self.act( self.grow2(real) ),   self.act( self.grow2(imag) )
-
-        if (1 in skips):  # this one has no discernable effect; but does yield more noise
-            real, imag = self.mapskip2(torch.cat((real, real_s2), 2)), self.mapskip2(torch.cat((imag, imag_s2), 2))   # make skip connection
-
-        real, imag = self.act( self.grow(real) ),    self.act( self.grow(imag) )
-
-        if (2 in skips):
-            real, imag = self.mapskip(torch.cat((real, real_s), 2)), self.mapskip(torch.cat((imag, imag_s), 2))   # make skip connection
-
-        y = self.decoder(real, imag)
-        y = y.squeeze(0)
-        y = self.act(self.back_grow2(y))
-        if (3 in skips):
-            y = self.bigskip( torch.cat((y, y_s), 1) )
-        y = self.back_grow(y)
-        #if (4 in skips):
-        #    y = self.finalskip( torch.cat((y, y_orig), 1) )  # too memory-intensive for large audio clips
-        return y
-
-
-
-class SpecEncDec_old(nn.Module):  # old version; unused
-    def __init__(self, ft_size=1024):          # ft_size must = 'chunk_size' elsewhere in code
-        super(SpecEncDec_old, self).__init__()
-        self.ft_size = ft_size
-        self.w_size = self.ft_size * 2
-        self.hop_size = self.ft_size
-        #self.encoder = front_end.Analysis(ft_size=self.ft_size, w_size=self.w_size, hop_size=self.hop_size)
-        #self.decoder = front_end.Synthesis(ft_size=self.ft_size, w_size=self.w_size, hop_size=self.hop_size)
-
-
-        self.encoder = front_end.FNNAnalysis(ft_size=ft_size)   # gives matrix mult. size mismatches
-        self.decoder = front_end.FNNSynthesis(ft_size=ft_size)
-
-        #define some other other layers which we may or may not use (just messing around)
-        self.cnn = CNNAuto(self.ft_size)
-        self.full_dim = int(ft_size/2 +1)
-        self.dense = nn.Linear(self.full_dim, self.full_dim)
-
-        #self.batch = nn.BatchNorm2d(500)
-        #proj_dim = int(self.full_dim*1.5)
-        #self.proj = nn.Linear(self.full_dim, proj_dim )
-        #self.deproj = nn.Linear( proj_dim, self.full_dim)
-
-        self.act = nn.LeakyReLU()   # ReLU, LeakyReLU, ELU & SELU all yield similar performance in my tets so far
-        #self.filter = LowPassLayer(self.ft_size)
-        #self.dropout = torch.nn.Dropout2d(p=0.1)
+        # a nonlinear activation; # Tried ReLU, ELU, SELU; Leaky seems to work best.  SELU yields instability
+        self.act     = nn.LeakyReLU(negative_slope=0.1)    # changing negative slope from 0.01 to 0.1 has almost no effect
 
     def forward(self, input_var):
-        y = self.encoder(input_var)
+        real1, imag1 = self.encoder(input_var)      # transform from time domain to spectral domain
 
-        #y = self.proj(y)
-        #y = self.act(y)
-        #y = self.dropout(y)
-        #middle = self.dense(x_ft)
-        #middle = self.act(middle)  # nonlinear activation function
+        # put real & imag together, and add intermediate layers
+        ricat = torch.cat((real1, imag1), 2)            # "ricat" = "real/imaginary cat"
+        #print("ricat.size() = ",ricat.size())
+        ricat_act = self.act(ricat)                     # nonlinear activation
 
-        # CNN version  works much more efficiently than fully-connected layers
-        y = y.unsqueeze(1)             # add one array dimension at index 1
-        y = self.cnn(y)                # added a new set of layer(s)
-        y = y.squeeze(1)       # remove extra array dimension at index 1
-        #y = self.dropout(y)
+        # intermediary "hourglass" or bottleneck  - including this part improves learning significantly
+        hg_s = self.act( self.shrink(ricat_act) )
+        hg_s2 = self.act( self.shrink2(hg_s) )
+        hg_g2 = self.act( self.grow2(hg_s2) )
+        hg_g = self.act( self.grow(hg_g2) )         # we are now back up to full size
 
-        #y = self.deproj(y)
-        y = self.act(y)
+        # now run the decoder/synthesis
+        uncat = torch.chunk( hg_g, 2, dim=2)       # split the cat-ed real & imag back up [arbitrarily] ;
+        real2, imag2 = uncat[0],uncat[1]
+        synthed = self.decoder(real2, imag2)
 
-        #middle = self.filter(middle)
-        wave_form = self.decoder(y)
-        return wave_form
+        # skip connection helps learning but is a memory hog for large chunk_size
+        #    This is why we prefer models that shrink in the temporal domain first,
+        #    i.e. to shrink the size of the model
+        catted = torch.cat((synthed, input_var), 2)
+        catted_act = catted # self.act(catted)   # adding activation has almost no effect, might hurt
+        output_var = self.mapskip(catted_act)
+        #output_var = self.act(output_var)   # don't do this. ruins training; makes output end up as nearly zero
+
+        layers = (ricat_act, hg_s, hg_g, synthed)                  # report additional intermediary values
+        return output_var, layers
 
 
-# my attempt at a Seq2Seq model.  TODO: Fix problem: Runs of memory.
+
+
 class Seq2Seq(nn.Module):
+    """
+    SHH's attempt at a Seq2Seq model.
+
+    TODO: Fix problem: Runs of memory.
+    """
     # TODO: Try adding Attention
     def __init__(self, input_size=8192, hidden_size=2048):
         super(Seq2Seq, self).__init__()
@@ -502,24 +446,28 @@ class Seq2Seq(nn.Module):
             return result
 
 
-# From  https://gist.github.com/lirnli/4282fcdfb383bb160cacf41d8c783c70
-#  One hot encoding for WaveNet (below)
 class One_Hot(nn.Module):
-    def __init__(self, depth):
+    """
+    One hot encoding, used by WaveNet (below)
+
+    From  https://gist.github.com/lirnli/4282fcdfb383bb160cacf41d8c783c70
+    """
+    def __init__(self, depth, device="cpu"):   # depth = mu of mu-law companding
         super(One_Hot,self).__init__()
         self.depth = depth
-        self.ones = torch.sparse.torch.eye(depth).cuda()
-
+        self.ones = torch.torch.eye(depth).to(device)
     def forward(self, X_in):
-        #print("X_in.squeeze(0).data = ",X_in.squeeze(0).data)
-        #print("OneHot forward: X_in = ",X_in)
-        return Variable(self.ones.index_select(0,X_in.squeeze(0).data))
+        return torch.index_select(self.ones, 0, X_in.data)
     def __repr__(self):
         return self.__class__.__name__ + "({})".format(self.depth)
 
-# From  https://gist.github.com/lirnli/4282fcdfb383bb160cacf41d8c783c70
-# This assumes that the input and target signals have been mu-law companded
 class WaveNet(nn.Module):
+    """
+    Google's (van den Oord et al's) WaveNet model, implemention from
+    https://gist.github.com/lirnli/4282fcdfb383bb160cacf41d8c783c70
+
+    This assumes that the input and target signals have been mu-law companded
+    """
     def __init__(self, mu=256,n_residue=32, n_skip= 512, dilation_depth=10, n_repeat=5):
         # mu: audio quantization size
         # n_residue: residue channels

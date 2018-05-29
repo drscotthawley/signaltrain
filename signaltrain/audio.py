@@ -10,6 +10,8 @@ from multiprocessing.pool import ThreadPool as Pool
 from functools import partial
 import scipy.signal as signal
 from torch.utils.data.dataset import Dataset
+from . import utils as st_utils
+import os
 
 # optional utility for applying effects via sox
 try:
@@ -25,16 +27,12 @@ except ImportError:
 
 # reads a file. currently maps stereo to mono by throwing out the right channel
 #   TODO: eventually we'd want to handle stereo somehow (e.g. for stereo effects)
-def read_audio_file(filename):
-    sig, fs = librosa.load(filename)
-    if (len(sig.shape) > 1):   # convert stereo to mono
-        return sig[0], fs
-    else:
-        return sig, fs
+def read_audio_file(filename, sr=44100):
+    signal, sr = librosa.load(filename, sr=sr, mono=True) # convert to mono
+    return signal, sr
 
-
-def write_audio_file(filename, sig, fs=44100):
-    librosa.output.write_wav(filename, sig, fs)
+def write_audio_file(filename, signal, sr=44100):
+    librosa.output.write_wav(filename, signal, sr)
     return
 
 
@@ -224,8 +222,8 @@ def echo(x, delay_samples=1487, echoes=2, ratio=0.6, dtype=np.float32):
     return y
 
 
-# simple compressor, thanks to Eric Tarr
-def compressor(x, thresh=-35, ratio=2, attack=4000, dtype=np.float32):
+# simple compressor effect, code thanks to Eric Tarr @hackaudio
+def compressor(x, thresh=-24, ratio=2, attack=2000, dtype=np.float32):
     fc = 1.0/(attack)               # this is like 1/attack time
     b, a = signal.butter(1, fc, analog=False)
     zi = signal.lfilter_zi(b, a)
@@ -277,15 +275,17 @@ class Limiter:
 
 
 def apply_sox_effect(signal, fxstr, sr=44100):
-    # This writes signal to a .wav file, processes it sox to another file, loads that and returns it.
-    #
-    # signal:  a numpy list of numbers; the audio signal
-    # sr:      the sample rate in Hz, must be an integer
-    # fxstr:   a semicolon-separated string starting with the effect name followed by parameter values in order
-    #          e.g., "lowpass;500" or "vol;18dB" or 'compand;0.3,0.8;-50', or if you're feeling ambitious,..
-    #                fxstr='ladspa;/usr/lib/ladspa/mbeq_1197.so;mbeq;-2;-3;-3;-6;-9;-9;-10;-8;-6;-5;-4;-3;-1;0;0;0'
-    #          See the sox docs for more on effects: http://sox.sourceforge.net/sox.html#EFFECTS
-    #          (Why semicolon-separated?  Because sox looks for both commas and colons!)
+    """
+    This writes signal to a .wav file, processes it sox to another file, loads that and returns it.
+
+     signal:  a numpy list of numbers; the audio signal
+     sr:      the sample rate in Hz, must be an integer
+     fxstr:   a semicolon-separated string starting with the effect name followed by parameter values in order
+              e.g., "lowpass;500" or "vol;18dB" or 'compand;0.3,0.8;-50', or if you're feeling ambitious,..
+                    fxstr='ladspa;/usr/lib/ladspa/mbeq_1197.so;mbeq;-2;-3;-3;-6;-9;-9;-10;-8;-6;-5;-4;-3;-1;0;0;0'
+              See the sox docs for more on effects: http://sox.sourceforge.net/sox.html#EFFECTS
+              (Why semicolon-separated?  Because sox looks for both commas and colons!)
+    """
     if (no_pysox is not None):
         raise ImportError("You don't have pysox installed.  Can't apply sox effect")
     inpath, outpath = 'in.wav', 'out.wav'
@@ -302,11 +302,12 @@ def apply_sox_effect(signal, fxstr, sr=44100):
     return out_signal[0:len(signal)]
 
 
-'''-----------------------------------------------------------------------------
-   'functions' is a repository of various audio effects, which in some cases are
-    literally just simple (time-independent) functions
--------------------------------------------------------------------------------'''
 def functions(x, f='id'):                # function to be learned
+    """
+       'functions' is a repository of various audio effects, which in some cases are
+        literally just simple (time-independent) functions
+    """
+
     if ('id' == f):
         return x 						# identity function
     elif ('x^2'==f):
@@ -349,68 +350,94 @@ def functions(x, f='id'):                # function to be learned
 
 
 
-
-# Chop'n'Stack!  Cuts up a signal into chunks and stacks them vertically. Pad with zeros
-def chopnstack(sig, num_chunks, chunk_size=8192):
-    return np.reshape(sig,1, num_chunks, chunk_size)
-    return sig
-    ## Note the chopnstack pair uses numpy instead of pytorch.  you can convert later with _from_numpy()
-    #sig_len = len(sig)
-    #rows = int(np.ceil(sig_len*1.0/chunk_size))          # number of chunks, round up
-    #num_to_pad = rows*chunk_size - sig_len
-    #sig = np.pad(sig,(0,num_to_pad),'constant')
-    #return np.reshape(sig, (-1, chunk_size))
-
-# Inverse of Chop'n'Stack: takes vertical stack and produces 1-D signal
-#  fastest method is ravel  https://ipython-books.github.io/45-understanding-the-internals-of-numpy-to-avoid-unnecessary-array-copying/
-#      ravel is faster than flatten because flatten sometimes copies and ravel never copies
-def inv_chopnstack(stack, orig_len=None):
-    return stack.ravel()
-
-
-# mu laws from https://gist.github.com/lirnli/4282fcdfb383bb160cacf41d8c783c70
-def encode_mu_law(x, mu=256):
-    mu = mu-1
-    fx = np.sign(x)*np.log(1+mu*np.abs(x))/np.log(1+mu)
-    return np.floor((fx+1)/2*mu+0.5).astype(np.long)
-
-def decode_mu_law(y, mu=256):
-    mu = mu-1
-    fx = (y-0.5)/mu*2-1
-    x = np.sign(fx)/mu*((1+mu)**np.abs(fx)-1)
-    return x
+# reads audio from any number of audio files sitting in directory 'path'
+# supplies a random window or chunk of lenth
+def readaudio_generator(seq_size=8192*2, chunk_size=8192,  path='Train',
+    basepath=os.path.expanduser('~')+'/datasets/signaltrain',
+    random_every=True):
+    # seq_size = amount of audio samples to supply from file
+    # basepath = directory containing Train, Val, and Test directories
+    # path = audio files for dataset  (can be Train, Val or test)
+    # random_every = get a random window every time next is called, or step sequentially through file
+    path = basepath+'/'+path+'/'
+    files = os.listdir(path)
+    sr = 44100
+    read_new_file = True
+    start = -seq_size
+    while True:
+        if read_new_file:
+            filename = path+np.random.choice(files)  # pick a random audio file in the directory
+            print("Reading new data from "+filename+" ")
+            data, sr = read_audio_file(filename, sr=sr)
+            read_new_file=False   # don't keep switching files  everytime generator is called
 
 
-'''---------------------------------------------------------------------------------------
-   gen_audio is the main routine to provide audio data.
-   TODO: should probably try adding mu-law companding to see if that helps with SNR
-   Inputs:
-         sig_length:  is actually the totally length (in samples) of the the entire dataset,
-                     conceived as if it were just one file.
-         device:     the pytorch device where the computation is performed
-         chunk_size: chop up the signal into chunks of this length.
-         effect:     string corresponding to a name of an audio effect
-                     Some of these just generate generic input & apply the effect to that,
-                     other 'effects' may involve generating input & output together
-        input_var & target_var: These *can* be passed in so that memory gets freed up
-                                before generating new data. (It'd be nice to be able to
-                                do everything 'in place', but w/ PyTorch vs. numpy, and
-                                GPU vs CPU, this can get complicated.)
-        mu_law:      Set to true to apply mu-law encoding to input & target audio
-        x_grad:      Normally the signal_var generated gets a gradient, but by setting this
-                     to False you can save memory
-        fs:          sample rate
----------------------------------------------------------------------------------------'''
-def gen_audio(sig_length, batch_size, device, chunk_size=8192, effect='ta', input_var=None, \
+        if (random_every): # grab a random window of the signal
+            start = np.random.randint(0,data.shape[0]-seq_size)
+        else:
+            start += seq_size
+        xraw = data[start:start+seq_size]   # the newaxis just gives us a [1,] on front
+        # Note: any 'windowing' happens after the effects are applied, later
+        rc = ( yield xraw )         # rc is set by generator's send() method.
+        if isinstance(rc, bool):    # can set read_new by calling send(True)
+            read_new_file = rc
+
+
+# General wrapper for readaudio_generator, that sets up windowes stacks
+# and converts to pytorch tensors
+def gen_audio(seq_size=8192*2, chunk_size=8192,  path='Train',
+    basepath=os.path.expanduser('~')+'/datasets/signaltrain',
+    random_every=True, effect='ta'):
+
+    signal_gen = readaudio_generator(seq_size, chunk_size, path, basepath, random_every)
+
+    while True:
+        X = next(signal_gen)
+        Y = functions(X, f=effect)
+        X = torch.from_numpy(st_utils.chopnstack(X,chunk_size)).unsqueeze(0)
+        Y = torch.from_numpy(st_utils.chopnstack(Y,chunk_size)).unsqueeze(0)
+        X.requires_grad, Y.requires_grad = False, False
+        rc = (yield X, Y)
+        if isinstance(rc, bool):    # our send method can pass data through
+            signal_gen.send(rc)
+
+
+
+'''
+def gen_synth_audio(sig_length, batch_size, device, chunk_size=8192, effect='ta', input_var=None, \
     target_var=None, mu_law=False, x_grad=True, fs=44100):
     dtype=np.float32
-
+    """
+    ---------------------------------------------------------------------------------------
+       gen__synth_audio is a routine that provides synthetic audio data.
+       TODO: should probably try adding mu-law companding to see if that helps with SNR
+       Inputs:
+             sig_length:  is actually the totally length (in samples) of the the entire dataset,
+                         conceived as if it were just one file.
+             device:     the pytorch device where the computation is performed
+             chunk_size: chop up the signal into chunks of this length.
+             effect:     string corresponding to a name of an audio effect
+                         Some of these just generate generic input & apply the effect to that,
+                         other 'effects' may involve generating input & output together
+            input_var & target_var: These *can* be passed in so that memory gets freed up
+                                    before generating new data. (It'd be nice to be able to
+                                    do everything 'in place', but w/ PyTorch vs. numpy, and
+                                    GPU vs CPU, this can get complicated.)
+            mu_law:      Set to true to apply mu-law encoding to input & target audio
+            x_grad:      Normally the signal_var generated gets a gradient, but by setting this
+                         to False you can save memory
+            fs:          sample rate
+    ---------------------------------------------------------------------------------------
+    """
     # Free up pytorch tensor memory usage before generating new data
     if (input_var is not None) and (target_var is not None):
         del input_var, target_var
 
+    overlap = 0 #int(chunk_size*0.1)    # this by how many elements the chunks (windows) will overlap
+    unique_per_chunk = chunk_size - 2*overlap
 
-    num_chunks = int(np.ceil(sig_length / chunk_size))
+    num_chunks = int(np.ceil(sig_length / unique_per_chunk))
+
     sig_length = num_chunks * chunk_size   # if requested size isn't integer multiple of chunk_size, we zero-pad
 
     input_sig = np.zeros( (batch_size, sig_length) ).astype(dtype)       # allocate storage
@@ -463,120 +490,35 @@ def gen_audio(sig_length, batch_size, device, chunk_size=8192, effect='ta', inpu
                 dtype = np.long
 
     # chop up the input & target signal(s)
-    input_sig.shape = (batch_size, num_chunks, chunk_size)
-    target_sig.shape = (batch_size, num_chunks, chunk_size)
+    #input_sig.shape = (batch_size, num_chunks, chunk_size)
+    #target_sig.shape = (batch_size, num_chunks, chunk_size)
 
-    print("input_sig.shape = ",input_sig.shape)
 
-    #input_stack =  chopnstack(input_sig, chunk_size=chunk_size)
-    #target_stack = chopnstack(target_sig, chunk_size=chunk_size)
-    #input_stack = torch.from_numpy( input_stack )
-    #target_stack = torch.from_numpy( target_stack )
+    input_stack =  chopnstack(input_sig, chunk_size=chunk_size, overlap=overlap)
+    target_stack = chopnstack(target_sig, chunk_size=chunk_size, overlap=overlap)
 
-    input_var = Variable(torch.from_numpy(input_sig), requires_grad=x_grad).to(device)
-    target_var = Variable(torch.from_numpy(target_sig), requires_grad=False).to(device)
+    input_var = Variable(torch.from_numpy(input_stack), requires_grad=x_grad).to(device)
+    target_var = Variable(torch.from_numpy(target_stack), requires_grad=False).to(device)
 
     return input_var, target_var
+'''
 
 
-# from the PyTorch Data Loading & Processing tutorial
-#  http://pytorch.org/tutorials/beginner/data_loading_tutorial.html
-class ToTensor(object):
-    """Convert ndarrays in sample to Tensors."""
-    def __call__(self, sample):
-        input, target = sample['input'], sample['target']
-        return {'input': torch.from_numpy(input),
-                'target': torch.from_numpy(target)}
-
-# like chop'n'stack, above but for PyTorch Data
-class Chunkify(object):
-    """Breaks signals up into chunks"""
-    def __init__(self, chunk_size, dtype=np.float32):
-        self.chunk_size = chunk_size
-        self.dtype = dtype
-        self.num_chunks = int(sig_length / chunk_size)
-
-    def __call__(self, sample):
-        input, target = sample['input'], sample['target']
-        return {'input': input.view(self.num_chunks, self.chunk_size),
-                'target': input.view(self.num_chunks, self.chunk_size) }
 
 
-# TODO: skeleton for future Dataset class for Pytorch Dataloaders.  Not finished.
-#    Reading from http://pytorch.org/tutorials/beginner/data_loading_tutorial.html
-#  (torchaudio doesn't install or I'd use that  http://pytorch.org/audio/datasets.html
-# ...this will replace gen_audio, above
-class AudioDataset(Dataset):
-    def __init__(self, sig_length, chunk_size=8192, effect='ta',  x_grad=True,
-        dtype=np.float32, mode='synth', input_var=None, target_var=None):
+# mu laws from https://gist.github.com/lirnli/4282fcdfb383bb160cacf41d8c783c70
+def encode_mu_law(x, mu=256):
+    mu = mu-1
+    fx = np.sign(x)*np.log(1+mu*np.abs(x))/np.log(1+mu)
+    return np.floor((fx+1)/2*mu+0.5).astype(np.long)
 
-        self.chunk_size = chunk_size
-        self.effect = effect
-        self.num_chunks = int(sig_length / chunk_size)
-        self.sig_length =  chunk_size * self.num_chunks  # this will pad with zeros to make sure everything fits
-        self.effect = effect
-        self.mode = mode
+def decode_mu_law(y, mu=256):
+    mu = mu-1
+    fx = (y-0.5)/mu*2-1
+    x = np.sign(fx)/mu*((1+mu)**np.abs(fx)-1)
+    return x
 
-        # allocate storage for input signal and output signal
-        #  this will get chopped up into chunks via a reshape
-        self.input_sig = np.zeros(self.sig_length).astype(dtype)
-        self.target_sig = self.input_sig.copy()
 
-        # set up some variables for generating randome signals
-        self.clips_per_chunk = 4
-        self.clip_size = int( self.chunk_size / self.clips_per_chunk)
-        self.t = np.linspace(0,1,num= self.clip_size)   # time values used by the generator equations
 
-        self.input_var = None
-        self.target_var = None
-
-        #self.input_stack = torch.zeros((num_chunks, chunk_size))
-        self.gen_new()  # provide some data for starters
-
-    def __getitem__(self, index):
-        # function returns the data and labels. This function is called from dataloader like this:
-        #      img, label = MyCustomDataset.__getitem__(99)  # For 99th item
-        # this is where torchvision transforms are often used
-        sample = {'input': self.input_var, 'target': self.target_var}
-        return sample
-
-    def __len__(self):
-        return self.input_var.size()[0] # how many examples you have
-
-    def gen_new(self, mode='synth'):   # this generates new data and places the results in the vars used by getitem
-        """
-             mode:    How the gen_new function acqures new data. (future)
-                         o 'synth'=synthesize new.  Future modes support...
-                         x 'samples'=make a collage of samples.  not working
-                         x 'load'=load audio from file.  not working
-        """
-        supported_modes = ('synth')
-        if mode not in supported_modes:
-            raise ValueError('AudioDataset.gen_new: Unssuported mode "'+mode+'". Supported modes are '+supported_modes)
-
-        num_sample_clips = int(self.sig_length / self.clip_size)
-        for i in range(num_sample_clips):               #  go through each section of input and assign a waveform
-            start_ind = i * self.clip_size
-            sample_type = 2  # 'pluck'
-            self.input_sig[start_ind:start_ind + self.clip_size] = gen_input_sample(self.t, chooser=sample_type)
-
-        # normalize the input audio to have max amplitude of 0.5; large values are problematic for the input
-        self.input_sig = 0.5 * self.input_sig / np.max(self.input_sig)
-
-        if ('delay' == self.effect):
-            self.input_sig *= 0.5    # for delay, just make it even smaller to avoid any clipping that may occur
-
-        # Apply the effect, whatever it is
-        self.target_sig = functions(self.input_sig, f=self.effect)
-
-        self.input_sig = chopnstack( self.input_sig, chunk_size=self.chunk_size)
-        self.target_sig = chopnstack( self.target_sig, chunk_size=self.chunk_size)
-
-        self.input_var = torch.from_numpy(self.input_sig, requires_grad=x_grad)
-        self.target_var = torch.from_numpy(self.target_sig, requires_grad=False)
-        #if torch.has_cudnn:
-        #    self.input_var = self.input_var.cuda()
-        #    self.target_var = self.target_var.cuda()
-        return
 
 # EOF
