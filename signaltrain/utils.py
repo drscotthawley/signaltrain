@@ -28,7 +28,7 @@ def progbar(epoch, max_epochs, batch_index, nbatches, loss, reg_term=None,
     bar  = '='*barlength + '>'
     leftover = width - barlength
     space =  ' '*leftover
-    loss_num = loss.item()
+    loss_num = loss#
     print(base_str + bar + space+' loss: {:10.5e}'.format(loss_num), end="")
     return
 
@@ -65,7 +65,7 @@ class LossLogger():
 
     def update(self, epoch, loss, vloss):
         """the main interface; stores losses in history dict, updates file"""
-        tloss, vloss = loss.item(), vloss.item()
+        tloss, vloss = loss, vloss # loss.item(), vloss.item()
         self.history['Epoch'].append(epoch)
         self.history['Train'].append(tloss)
         self.history['Val'].append(vloss)
