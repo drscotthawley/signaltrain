@@ -12,6 +12,7 @@ import scipy.signal as signal
 from torch.utils.data.dataset import Dataset
 from . import utils as st_utils
 import os
+import random
 
 # optional utility for applying effects via sox
 try:
@@ -383,19 +384,113 @@ def readaudio_generator(seq_size=8192*2, chunk_size=8192,  path='Train',
             read_new_file = rc
 
 
-# General wrapper for readaudio_generator, that sets up windowes stacks
-# and converts to pytorch tensors
+
+
+def samplecat_ta(path=os.path.expanduser('~')+'/SampleCat/DrumSamples_large/',
+    sr=44100, bpm=90, seq_size=24900*1000, shuffle=True):
+    """
+    Concatenates audio clips/samples (e.g. drums), generates time-aligned and
+    and randomly-shifted variants, as well as a click track
+
+    Inputs:
+        path:     Directory where .WAV sample files are located
+        sr:       Sample rate in Hz
+        bpm:      Beats per minute for time-alignment and click generation
+        seq_size: Length in samples of generated audio signal
+        shuffle:  Whether or not to randomly permute the order of sample files
+
+    Outputs:
+        final_clip_randomized: Audio sequence of many samples, randomly shifted
+        final_clip:            Audio sequence of same samples, 'on the grid'
+        click:                 Audio click track corresponding to the 'grid'
+
+    Author: B.L. Colburn, benjamin.colburn@pop.belmont.edu
+    """
+    print("Initializing samplecat_ta:",end="")
+    click_delay = 60/bpm    # in seconds
+    sample_delay = librosa.core.time_to_samples(click_delay, sr=sr)
+    try:
+        files = os.listdir(path)
+    except:
+        print("Error! Can't find audio samples in",path)
+        return None
+
+    final_clip = np.zeros((seq_size,),dtype=np.float32)
+    final_clip_randomized = np.zeros((seq_size+sample_delay,),dtype=np.float32)
+
+    paths = []
+    for f in files:
+        if f.endswith(".WAV"):
+            paths.append(path + "/" +f)
+    print("",len(paths),"audio clips available in",path)
+
+    while True:   # can use this as a generator, call inf. many times
+        if shuffle:
+            print("samplecat_ta: shuffling order of clips...")
+            random.shuffle(paths)
+            shuffle = False    # turn it off so it only shuffles when asked to
+
+        # fill up final_clip & final_clip_randomized with audio clips/samples
+        i, current_size = 0, 0
+        while current_size<final_clip.shape[0] and i < len(paths):
+            if i != 0:
+                r_shift = int(sample_delay/4 * (2*np.random.rand()-1))
+            else:
+                r_shift = int(sample_delay/int(random.randrange(4,7))) # first clip is never early, only late
+            start   = i * sample_delay
+            start_s = i * sample_delay + r_shift
+            end   = min(start + sample_delay,  final_clip.shape[0])
+            end_s = min(start_s + sample_delay,  final_clip.shape[0])
+            clip, _ = librosa.core.load(paths[i], mono=True, sr=sr, duration=4.0)  # ", _" means we throw out the sr returned by load
+            clip = librosa.util.fix_length(clip, sample_delay)
+            final_clip[start:end] = clip[0:end-start]
+            final_clip_randomized[start_s:end_s] = clip[0:end_s-start_s]
+            i=i+1
+            current_size = current_size + clip.shape[0]
+
+        # produce the click track
+        duration = librosa.core.get_duration(final_clip, sr=sr)
+        num_clicks = int( np.ceil(duration / click_delay) )   # ceil rounds up
+        times = np.arange(num_clicks) * click_delay
+        click = librosa.core.clicks(times=times, sr=sr, click_duration=click_delay, click_freq=200, length=final_clip.shape[0])
+
+        #? SHH: why is this here?
+        #final_clip = np.trim_zeros(final_clip,'b')
+        #final_clip_randomized = np.trim_zeros(final_clip_randomized,'b')
+
+        # How about instead of that: make three audio arrays the same length
+        min_length = min( min( final_clip.shape[0], final_clip_randomized.shape[0]), click.shape[0])
+
+        # return values from the generator; shuffle can be (re)set set via send() method
+        shuffle = ( yield final_clip_randomized[0:min_length], final_clip[0:min_length], click[0:min_length] )
+
+        final_clip *= 0   # when generator is called again, start here & clear variables
+        final_clip_randomized *= 0
+
+
+
+
 def gen_audio(seq_size=8192*2, chunk_size=8192,  path='Train',
     basepath=os.path.expanduser('~')+'/datasets/signaltrain',
     random_every=True, effect='ta'):
+    """
+    General wrapper for audio generators, that sets up windowed 'stacks'
+    and converts to pytorch tensors
+    """
 
-    signal_gen = readaudio_generator(seq_size, chunk_size, path, basepath, random_every)
+    if effect != 'ta':
+        signal_gen = readaudio_generator(seq_size, chunk_size, path, basepath, random_every)
+    else:
+        signal_gen = samplecat_ta(seq_size=seq_size)
 
     while True:
-        X = next(signal_gen)
-        Y = functions(X, f=effect)
-        X = torch.from_numpy(st_utils.chopnstack(X,chunk_size)).unsqueeze(0)
-        Y = torch.from_numpy(st_utils.chopnstack(Y,chunk_size)).unsqueeze(0)
+        if effect != 'ta':
+            X = next(signal_gen)
+            Y = functions(X, f=effect)
+        else:
+            X, Y, click = next(signal_gen)
+        X = torch.from_numpy(st_utils.chopnstack(X, chunk_size)).unsqueeze(0)
+        Y = torch.from_numpy(st_utils.chopnstack(Y, chunk_size)).unsqueeze(0)
         X.requires_grad, Y.requires_grad = False, False
         rc = (yield X, Y)
         if isinstance(rc, bool):    # our send method can pass data through
