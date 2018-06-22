@@ -27,11 +27,11 @@ def nearest_even(x):
         return y+1
 
 
-class SpecShrinkGrow_cat(nn.Module):
+class SpecShrinkGrow_catri_skipadd(nn.Module):
     """
-    Spectral bottleneck encoder, cat real & imag parts together
+    Spectral bottleneck encoder, cat real & imag parts together, skip connections are additions
 
-    SHH: This version is my current preference
+    SHH: This version was responsible for a June 22, 2018 milestone of learning the compressor for random event onsets
 
     This model first projects the input audio to smaller sizes, using some 'dense' layers,
     Then calls the FNN analysis routine, does show shinking & growing, calls FNNSynthesis,
@@ -40,7 +40,7 @@ class SpecShrinkGrow_cat(nn.Module):
     For a diagram of thi smodel, see ../docs/model_diagram.png
     """
     def __init__(self, chunk_size=1024):
-        super(SpecShrinkGrow_cat, self).__init__()
+        super(SpecShrinkGrow_catri_skipadd, self).__init__()
 
         ratio = 3   # Reduction ratio. 3 works about as well as 2.  4 seems to be too much
                     # one problem with ratio of 3 is it can produce odd sizes that don't split the data evenly between two GPUs
@@ -69,26 +69,7 @@ class SpecShrinkGrow_cat(nn.Module):
         self.shrink2 = nn.Linear(self.med_dim,   small_dim, bias=False)
         self.grow2   = nn.Linear(small_dim, self.med_dim, bias=False)
         self.grow    = nn.Linear(self.med_dim,   self.full_dim, bias=False)
-
-        # replacing these dense layers for skip connections with simple addition to save memory
-        #self.mapskip  = nn.Linear(2*self.full_dim,  self.full_dim, bias=False)  # maps concatenated skip connection to 'regular' size
-        #self.mapskip2 = nn.Linear(2*self.med_dim,   self.med_dim, bias=False)
-        #self.mapbigskip = nn.Linear(2*self.mid_size,   self.mid_size, bias=False)
-        #self.finalskip = nn.Linear(2*chunk_size,   chunk_size, bias=False)  # does not fit in CUDA memory
-
         self.act     = nn.LeakyReLU()   # Tried ReLU, ELU, SELU; Leaky seems to work best.  SELU yields instability
-        #self.initialize()  # not calling because replaced cat skip connections with sums
-
-    #def initialize(self):
-    #    # add identities to default init for mapping skip connections, to let signals "pass through"
-    #    init_skip = np.concatenate( (np.eye(self.full_dim), np.eye(self.full_dim)), axis=1).astype(np.float32)
-    #    init_skip2 = np.concatenate( (np.eye(self.med_dim), np.eye(self.med_dim)), axis=1).astype(np.float32)
-    #    self.mapskip.weight.data += torch.from_numpy(init_skip)
-    #    self.mapskip2.weight.data += torch.from_numpy(init_skip2)
-    #
-    #    init_big = np.concatenate( (np.eye(self.mid_size), np.eye(self.mid_size)), axis=1).astype(np.float32)
-    #    self.mapbigskip.weight.data += torch.from_numpy(init_big)
-
 
     def forward(self, input_var, skips=(2,3,4)):    # my trials indicate skips=(2,3) works best. (1,2,3) has more noise, (3) converges slower, no skips converges slowest
         y_s = self.act( self.front_shrink(input_var) )     # _s to prepare for skip connection "skips=3"
@@ -101,14 +82,10 @@ class SpecShrinkGrow_cat(nn.Module):
         # ----- here is the 'middle of the hourglass';  from here we expand
 
         ricat     = self.act( self.grow2(ricat) )
-        #if (1 in skips):  # this one has no discernable effect; but does yield more noise
-        #    #ricat = self.mapskip2(torch.cat((ricat, ricat_s2), 2)) # make skip connection
-        #    ricat += ricat_s2
 
         ricat     = self.act( self.grow(ricat) )
         if (2 in skips):
             ricat += ricat_s  # skip connection; simple addition uses less memory than map(torch.cat)
-            #ricat = self.mapskip(torch.cat((ricat, ricat_s), 2))   # make skip connection
 
         # split the cat-ed real & imag back up [arbitrarily] ;
         uncat = torch.chunk( ricat, 2, dim=2)
@@ -117,7 +94,6 @@ class SpecShrinkGrow_cat(nn.Module):
         y = self.decoder(uncat[0],uncat[1])
         y = self.act(self.back_grow2(y))
         if (3 in skips):
-            #y = self.mapbigskip( torch.cat((y, y_s), 2)  )
             y += y_s
         y = self.back_grow(y)
         if (4 in skips):  # for final skip we simply add (WaveNet does this). cat is too memory-intensive for large audio clips

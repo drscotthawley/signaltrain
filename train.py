@@ -129,7 +129,7 @@ def eval_model(model, criterion, lambdas, losslogger, sig_length, chunk_size, de
         # st.audio.gen_audio(sig_length, chunk_size=chunk_size, effect=effect)
     Y_pred, layers_pred = model(X)    # run network forward
     loss = calc_loss(Y_pred, Y_test, criterion, lambdas)
-    loss_num = loss.data.cpu().numpy() 
+    loss_num = loss.data.cpu().numpy()
     print(loss_num)
     outfile = 'final'
     print("Saving final Test evaluation report to ",outfile,".*",sep="")
@@ -218,7 +218,7 @@ def main():
         model = st.models.Seq2Seq()
         retain_graph=True
     elif ('specsg' == args.model):
-        model = st.models.SpecShrinkGrow_cat(chunk_size=args.chunk)
+        model = st.models.SpecShrinkGrow_catri_skipadd(chunk_size=args.chunk)
     elif ('specfb' == args.model):
         model = st.models.SpecFrontBack(chunk_size=args.chunk)
     elif ('manyto1' == args.model):
