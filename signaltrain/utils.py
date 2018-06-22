@@ -339,12 +339,12 @@ def make_report(input_var, target_var, wave_form, loss_log, outfile=None,
 
     panels[0].set_ylabel('Loss')
     panels[0].set_xlabel('Epoch')
-    panels[0].legend(loc=1)
+    panels[0].legend(loc='lower left')
     xmin = 1
     if (ehist[-1] > 100):  # ignore the 1st 10 epochs (better when plotting with loglog scale)
         xmin = 100
     panels[0].set_xlim(left=xmin)
-    panels[0].set_ylim(bottom=1e-4)#, top=loss_log.history['Val'][xmin] )
+    #panels[0].set_ylim(bottom=1e-4)#, top=loss_log.history['Val'][xmin] )
 
 
     if (input_var is None):  # exit, just show loss graph and get out

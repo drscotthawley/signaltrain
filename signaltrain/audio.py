@@ -154,12 +154,13 @@ def gen_input_sample(t, chooser=None):
         global global_freq
         global_freq = freq
         return amp*np.sin(freq*t)
-    elif (2 == chooser):                  # "pluck"
+    elif (2 == chooser):                  # noisy "pluck"
         amp0 = (0.6*np.random.random()+0.3)*np.random.choice([-1,1])
         t0 = (2*np.random.random()-1)*0.3
-        decay = 8*np.random.random()
         freq = 6400*np.random.random()
-        x = amp0*np.exp(-decay * (t-t0) ) * np.sin(freq* (t-t0))
+        x = amp0*np.sin(freq* (t-t0))
+        decay = 8*np.random.random()
+        x = np.exp(-decay * (t-t0) ) * x   # decaying envelope
         x[np.where(t < t0)] = 0   # without this, it grow exponentially 'to the left'
         return x
     elif (3 == chooser):                # ramp up then down
@@ -195,6 +196,18 @@ def gen_input_sample(t, chooser=None):
         #amp = 2.0*np.random.random()
         x = amp*(2*np.random.random(t.shape[0])-1)
         return x
+    elif (7 == chooser):              # noisy 'pluck'
+        amp0 = (0.7*np.random.random()+0.2)*np.random.choice([-1,1])
+        t0 = np.random.random()*0.5   # start late by some amount
+        freq = 6400*np.random.random()
+        x = amp0*np.sin(freq* (t-t0))
+        amp_n = (0.4*np.random.random()+0.2)
+        noise = amp_n*(2*np.random.random(t.shape[0])-1)  #noise centered around 0
+        x += noise
+        decay = 8*np.random.random()
+        x = np.exp(-decay * (t-t0) ) * x   # decaying envelope
+        x[np.where(t < t0)] = 0   # without this, it grow exponentially 'to the left'
+        return x
     else:
         x= 0.5*(gen_input_sample(t)+gen_input_sample(t)) # superposition of previous
         return x
@@ -224,7 +237,9 @@ def echo(x, delay_samples=1487, echoes=2, ratio=0.6, dtype=np.float32):
 
 
 # simple compressor effect, code thanks to Eric Tarr @hackaudio
-def compressor(x, thresh=-24, ratio=2, attack=2000, dtype=np.float32):
+#def compressor(x, thresh=-24, ratio=2, attack=2000, dtype=np.float32): # attack=2000 used for real audio
+def compressor(x, thresh=-24, ratio=2, attack=200, dtype=np.float32):
+
     fc = 1.0/(attack)               # this is like 1/attack time
     b, a = signal.butter(1, fc, analog=False)
     zi = signal.lfilter_zi(b, a)
@@ -350,10 +365,18 @@ def functions(x, f='id'):                # function to be learned
         raise ValueError("functions: error invalid type: "+f)
 
 
+# generator for sytnthetic waveforms via gen_input_sample()
+def synthaudio_generator(seq_size=8192, dtype=np.float32):
+    t = np.linspace(0,1,num=seq_size).astype(dtype)
+    sample_type = 7   # hard coding "noisy pluck" for now
+    while True:
+        clip = gen_input_sample(t,chooser=sample_type)
+        yield clip
+
 
 # reads audio from any number of audio files sitting in directory 'path'
 # supplies a random window or chunk of lenth
-def readaudio_generator(seq_size=8192*2, chunk_size=8192,  path='Train',
+def readaudio_generator(seq_size=8192*2,  path='Train',
     basepath=os.path.expanduser('~')+'/datasets/signaltrain',
     random_every=True):
     # seq_size = amount of audio samples to supply from file
@@ -387,7 +410,7 @@ def readaudio_generator(seq_size=8192*2, chunk_size=8192,  path='Train',
 
 
 def samplecat_ta(path=os.path.expanduser('~')+'/SampleCat/DrumSamples_large/',
-    sr=44100, bpm=90, seq_size=24900*1000, shuffle=True):
+    sr=44100, bpm=90, seq_size=24900*1000, shuffle=True, max_shift=7500):
     """
     Concatenates audio clips/samples (e.g. drums), generates time-aligned and
     and randomly-shifted variants, as well as a click track
@@ -433,10 +456,9 @@ def samplecat_ta(path=os.path.expanduser('~')+'/SampleCat/DrumSamples_large/',
         # fill up final_clip & final_clip_randomized with audio clips/samples
         i, current_size = 0, 0
         while current_size<final_clip.shape[0] and i < len(paths):
-            if i != 0:
-                r_shift = int(sample_delay/4 * (2*np.random.rand()-1))
-            else:
-                r_shift = int(sample_delay/int(random.randrange(4,7))) # first clip is never early, only late
+            r_shift =  int((2*np.random.rand()-1)*max_shift)
+            if i == 0:
+                r_shift =  abs(r_shift)  # first clip needs to be never early, only late
             start   = i * sample_delay
             start_s = i * sample_delay + r_shift
             end   = min(start + sample_delay,  final_clip.shape[0])
@@ -458,7 +480,7 @@ def samplecat_ta(path=os.path.expanduser('~')+'/SampleCat/DrumSamples_large/',
         #final_clip = np.trim_zeros(final_clip,'b')
         #final_clip_randomized = np.trim_zeros(final_clip_randomized,'b')
 
-        # How about instead of that: make three audio arrays the same length
+        # How about instead of that: make the three audio arrays the same length
         min_length = min( min( final_clip.shape[0], final_clip_randomized.shape[0]), click.shape[0])
 
         # return values from the generator; shuffle can be (re)set set via send() method
@@ -479,10 +501,10 @@ def gen_audio(seq_size=8192*2, chunk_size=8192,  path='Train',
     """
 
     if effect != 'ta':
-        signal_gen = readaudio_generator(seq_size, chunk_size, path, basepath, random_every)
+        #signal_gen = readaudio_generator(seq_size, chunk_size, path, basepath, random_every)
+        signal_gen = synthaudio_generator(seq_size=seq_size)
     else:
-        signal_gen = samplecat_ta(seq_size=seq_size)
-
+        signal_gen = samplecat_ta(seq_size=seq_size, bpm=120, max_shift=int(chunk_size/3))
     while True:
         if effect != 'ta':
             X = next(signal_gen)

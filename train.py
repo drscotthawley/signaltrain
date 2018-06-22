@@ -129,7 +129,7 @@ def eval_model(model, criterion, lambdas, losslogger, sig_length, chunk_size, de
         # st.audio.gen_audio(sig_length, chunk_size=chunk_size, effect=effect)
     Y_pred, layers_pred = model(X)    # run network forward
     loss = calc_loss(Y_pred, Y_test, criterion, lambdas)
-    loss_num = loss.data.cpu().numpy()
+    loss_num = loss.data.cpu().numpy() 
     print(loss_num)
     outfile = 'final'
     print("Saving final Test evaluation report to ",outfile,".*",sep="")
@@ -242,7 +242,7 @@ def main():
     losslogger = st.utils.LossLogger(name=args.name)
 
     if (args.model != 'wavenet'):
-        criterion = torch.nn.MSELoss()
+        criterion =  torch.nn.MSELoss()
         optimizer = torch.optim.Adam( model.parameters(), lr=args.lr, eps=5e-6)    #,  amsgrad=True)
     else:
         raise ValueError("Sorry, model 'wavenet' isn't ready yet.")
