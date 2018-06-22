@@ -42,16 +42,18 @@ def train_model(model, optimizer, criterion, lambdas, train_gen, val_gen, cmd_ar
             X_train, Y_train = next(train_gen)
             train_gen.send(True)    # tell generator to read from a new file next time
             X_val, Y_val = next(val_gen)
+            Ypred_val = Y_val.clone()
 
         print('Epoch ', epoch,' /', max_epochs, sep="", end=":")
 
         # technically, batches are usually the '0' index; for now we're treating
         # time steps as if they were batches, using index 1
         n_batches = int(X_train.size()[1] / batch_size)
+        epoch_loss = 0
         for batch_num in range(n_batches):  # inside this loop is "per batch"
 
             optimizer.zero_grad()                 # get ready to accumulate new gradients
-            
+
             # to avoid CUDA out of memory, only send batches to the GPU
             bgn, end = batch_num*batch_size, min( (batch_num+1)*batch_size, X_train.size()[1])
             X_batch = X_train[:,bgn:end,:].to(device)     # input signal,
@@ -65,8 +67,9 @@ def train_model(model, optimizer, criterion, lambdas, train_gen, val_gen, cmd_ar
                 reg_term = z.norm(1) * 1e-4
 
             loss = calc_loss(Y_pred, Y_batch, criterion)
+            epoch_loss += loss.item()
             X_batch, Y_batch, Y_pred = X_batch.cpu(), Y_batch.cpu(), Y_pred.cpu()  # free up VRAM
-            st.utils.progbar(epoch, max_epochs, batch_num, n_batches, loss)  # show a progress bar through the epoch
+            st.utils.progbar(epoch, max_epochs, batch_num, n_batches, epoch_loss/(batch_num+1))  # show a progress bar through the epoch
 
             #reg_term = loss * 1e-4 # Dumb regularization for the moment
 
@@ -77,20 +80,29 @@ def train_model(model, optimizer, criterion, lambdas, train_gen, val_gen, cmd_ar
             loss.backward(retain_graph=retain_graph)    # usually retain_graph=False unless we use an RNN
             optimizer.step()
 
-        if loss.data.cpu().numpy() < tol:
-            break
+        #if loss.data.cpu().numpy() < tol:   # commented out: if it hits a patch of zeros, we don't exit
+        #    break
+        epoch_loss /= n_batches
 
         #----- after full dataset run through (all batches),do various reporting & diagnostic things
 
 
         if ((X_val is not None) and (Y_val is not None)):
             with torch.no_grad():           # not tracking gradients saves VRAM, bigtime
-                X_val, Y_val = X_val.to(device), Y_val.to(device)
-                Ypred_val, layers_pred = model(X_val)
-                vloss = calc_loss(Ypred_val, Y_val, criterion)
-                X_val, Y_val, Ypred_val = X_val.cpu(), Y_val.cpu(), Ypred_val.cpu()  # free up VRAM on the GPU
-
-            losslogger.update(epoch, loss, vloss)
+                n_batches = int(X_val.size()[1] / batch_size)
+                epoch_vloss = 0
+                for batch_num in range(n_batches):
+                    #X_val, Y_val = X_val.to(device), Y_val.to(device)
+                    bgn, end = batch_num*batch_size, min( (batch_num+1)*batch_size, X_val.size()[1])
+                    X_batch = X_val[:,bgn:end,:].to(device)     # input signal,
+                    Y_batch = Y_val[:,bgn:end,:].to(device)     # target output
+                    Ypred_val_batch, layers_pred = model(X_batch)
+                    vloss = calc_loss(Ypred_val_batch, Y_batch, criterion)
+                    epoch_vloss += vloss.item()
+                    Ypred_val[:,bgn:end,:] = Ypred_val_batch.detach().cpu()  # save the prediction for plotting later
+                    #X_val, Y_val, Ypred_val = X_val.cpu(), Y_val.cpu(), Ypred_val.cpu()  # free up VRAM on the GPU
+                epoch_vloss /= n_batches
+            losslogger.update(epoch, epoch_loss, epoch_vloss)
 
         if (epoch > start_epoch):
             if (0 == epoch % save_every) or (epoch >= max_epochs-1):
@@ -117,7 +129,7 @@ def eval_model(model, criterion, lambdas, losslogger, sig_length, chunk_size, de
         # st.audio.gen_audio(sig_length, chunk_size=chunk_size, effect=effect)
     Y_pred, layers_pred = model(X)    # run network forward
     loss = calc_loss(Y_pred, Y_test, criterion, lambdas)
-    loss_num = loss.data.cpu().numpy()
+    loss_num = loss.data.cpu().numpy() 
     print(loss_num)
     outfile = 'final'
     print("Saving final Test evaluation report to ",outfile,".*",sep="")
@@ -230,7 +242,7 @@ def main():
     losslogger = st.utils.LossLogger(name=args.name)
 
     if (args.model != 'wavenet'):
-        criterion = torch.nn.MSELoss()
+        criterion =  torch.nn.MSELoss()
         optimizer = torch.optim.Adam( model.parameters(), lr=args.lr, eps=5e-6)    #,  amsgrad=True)
     else:
         raise ValueError("Sorry, model 'wavenet' isn't ready yet.")
@@ -262,8 +274,8 @@ def main():
     #------------------------------------------
     # Set up Training and Validation data generators
     #------------------------------------------
-    train_gen = st.audio.gen_audio(seq_size=int(args.chunk*2), chunk_size=args.chunk,path='Train',effect=args.effect)
-    val_gen = st.audio.gen_audio(seq_size=int(args.chunk*2), chunk_size=args.chunk,path='Val', effect=args.effect, random_every=False)
+    train_gen = st.audio.gen_audio(seq_size=int(args.length), chunk_size=args.chunk,path='Train',effect=args.effect)
+    val_gen = st.audio.gen_audio(seq_size=int(args.length), chunk_size=args.chunk,path='Val', effect=args.effect, random_every=False)
 
     #--------------------
     # Call training Loop
@@ -275,8 +287,9 @@ def main():
     #--------------------------------
     # Evaluate model on Test dataset
     #--------------------------------
-    eval_model(model, criteria, lambdas, losslogger, sig_length, chunk_size, device, args.effect,
-        fs=fs, effect=args.effect, mu_law=mu_law, dataset=dataset)
+    # Broken for now
+    #eval_model(model, criteria, lambdas, losslogger, sig_length, chunk_size, device, args.effect,
+    #    fs=fs, effect=args.effect, mu_law=mu_law, dataset=dataset)
     return
 
 if __name__ == '__main__':

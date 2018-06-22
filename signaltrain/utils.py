@@ -28,7 +28,7 @@ def progbar(epoch, max_epochs, batch_index, nbatches, loss, reg_term=None,
     bar  = '='*barlength + '>'
     leftover = width - barlength
     space =  ' '*leftover
-    loss_num = loss.item()
+    loss_num = loss#
     print(base_str + bar + space+' loss: {:10.5e}'.format(loss_num), end="")
     return
 
@@ -65,7 +65,7 @@ class LossLogger():
 
     def update(self, epoch, loss, vloss):
         """the main interface; stores losses in history dict, updates file"""
-        tloss, vloss = loss.item(), vloss.item()
+        tloss, vloss = loss, vloss # loss.item(), vloss.item()
         self.history['Epoch'].append(epoch)
         self.history['Train'].append(tloss)
         self.history['Val'].append(vloss)
@@ -339,12 +339,12 @@ def make_report(input_var, target_var, wave_form, loss_log, outfile=None,
 
     panels[0].set_ylabel('Loss')
     panels[0].set_xlabel('Epoch')
-    panels[0].legend(loc=1)
+    panels[0].legend(loc='lower left')
     xmin = 1
     if (ehist[-1] > 100):  # ignore the 1st 10 epochs (better when plotting with loglog scale)
         xmin = 100
     panels[0].set_xlim(left=xmin)
-    panels[0].set_ylim(bottom=1e-4)#, top=loss_log.history['Val'][xmin] )
+    #panels[0].set_ylim(bottom=1e-4)#, top=loss_log.history['Val'][xmin] )
 
 
     if (input_var is None):  # exit, just show loss graph and get out
