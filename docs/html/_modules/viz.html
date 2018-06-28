@@ -1,0 +1,380 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>viz &#8212; signaltrain 0.0.1 documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../_static/jquery.js"></script>
+    <script type="text/javascript" src="../_static/underscore.js"></script>
+    <script type="text/javascript" src="../_static/doctools.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for viz</h1><div class="highlight"><pre>
+<span></span><span class="ch">#! /usr/bin/env python3</span>
+<span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="n">__author__</span> <span class="o">=</span> <span class="s1">&#39;Scott H. Hawley&#39;</span>
+<span class="n">__copyright__</span> <span class="o">=</span> <span class="s1">&#39;Scott H. Hawley&#39;</span>
+
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Draft. Just a demo for now.</span>
+
+<span class="sd">Visualization of model activations (and weights)</span>
+<span class="sd">-  in realtime, based on live microphone input - &#39;oscilloscope-like&#39; display</span>
+<span class="sd">-  TODO: from audio file(s)</span>
+
+<span class="sd">Still under development.  Currently it just reads from the (live) default microphone,</span>
+<span class="sd">multiplies by one pre-fabriated array of weights and shows the result.</span>
+<span class="sd">Later I will try to load layers from a model, e.g. from checkpoint files</span>
+
+<span class="sd">Tested only on Mac OS X High Sierra with Python 3.6 (Anaconda)</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">import</span> <span class="nn">argparse</span>
+<span class="kn">import</span> <span class="nn">signaltrain</span> <span class="k">as</span> <span class="nn">st</span>
+<span class="kn">import</span> <span class="nn">cv2</span>                  <span class="c1"># pip install opencv-python</span>
+<span class="kn">import</span> <span class="nn">soundcard</span> <span class="k">as</span> <span class="nn">sc</span>      <span class="c1"># pip install git+https://github.com/bastibe/SoundCard</span>
+<span class="kn">from</span> <span class="nn">scipy.ndimage.interpolation</span> <span class="k">import</span> <span class="n">shift</span>  <span class="c1"># used for oscilloscope trigger</span>
+
+
+<span class="c1"># Gobal parameters...   TODO: move these elswhere...</span>
+
+<span class="c1"># Define the layers &amp; their sizes</span>
+<span class="c1"># Layer sizes - lengths of the activation (output) of each layer</span>
+<span class="c1"># This is assuming a &#39;Sequential&#39; model.  No skip connections.</span>
+<span class="c1">#     - Input counts as layer 0</span>
+<span class="c1">#     - Layer 1 maps</span>
+<span class="c1">#  TODO: add option of activation functions (RelU, etc). So far all are linear activations</span>
+<span class="c1">#  TODO: get rid of all global variables!!</span>
+<span class="n">layer_act_dims</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1024</span><span class="p">,</span><span class="mi">1024</span><span class="p">,</span><span class="mi">1024</span><span class="p">]</span><span class="c1">#,512]</span>
+<span class="n">n_weights</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">layer_act_dims</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;n_weights = &quot;</span><span class="p">,</span><span class="n">n_weights</span><span class="p">)</span>
+<span class="n">weights_dims</span> <span class="o">=</span><span class="p">[]</span>
+<span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_weights</span><span class="p">):</span>
+    <span class="n">weights_dims</span><span class="o">.</span><span class="n">append</span><span class="p">(</span> <span class="p">[</span><span class="n">layer_act_dims</span><span class="p">[</span><span class="n">i</span><span class="p">],</span><span class="n">layer_act_dims</span><span class="p">[</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">]])</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;weights_dims =&quot;</span><span class="p">,</span><span class="n">weights_dims</span><span class="p">)</span>
+
+
+<span class="n">imWidth</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">layer_act_dims</span><span class="p">)</span>    <span class="c1"># image width for &#39;oscilloscope display&#39;</span>
+<span class="n">imHeight</span> <span class="o">=</span> <span class="mi">600</span>                   <span class="c1"># image height for oscilloscope display; can be anything.</span>
+
+<span class="n">layer_in_dim</span><span class="p">,</span> <span class="n">layer_out_dim</span> <span class="o">=</span> <span class="n">layer_act_dims</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">layer_act_dims</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="c1"># TODO: this is legacy from earlier version</span>
+
+<span class="c1"># OpenCV BGR colors</span>
+<span class="n">blue</span><span class="p">,</span> <span class="n">green</span><span class="p">,</span> <span class="n">cyan</span> <span class="o">=</span> <span class="p">(</span><span class="mi">255</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mi">0</span><span class="p">),</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="mi">255</span><span class="p">,</span><span class="mi">0</span><span class="p">),</span> <span class="p">(</span><span class="mi">255</span><span class="p">,</span><span class="mi">255</span><span class="p">,</span><span class="mi">0</span><span class="p">)</span>
+<span class="c1">#OpenCV colormaps</span>
+<span class="n">blackwhite</span><span class="p">,</span> <span class="n">rainbow</span><span class="p">,</span> <span class="n">heat</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">COLORMAP_BONE</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">COLORMAP_JET</span><span class="p">,</span> <span class="n">cv2</span><span class="o">.</span><span class="n">COLORMAP_AUTUMN</span>
+
+
+
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Routines that draw weights</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="c1"># draw weights for one layer</span>
+<div class="viewcode-block" id="draw_weights_layer"><a class="viewcode-back" href="../viz.html#viz.draw_weights_layer">[docs]</a><span class="k">def</span> <span class="nf">draw_weights_layer</span><span class="p">(</span><span class="n">weights_layer</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="s2">&quot;weights_layer&quot;</span><span class="p">,</span> <span class="n">colormap</span><span class="o">=</span><span class="n">rainbow</span><span class="p">):</span>
+    <span class="n">img</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">weights_layer</span><span class="o">*</span><span class="mi">255</span> <span class="p">,</span><span class="o">-</span><span class="mi">255</span><span class="p">,</span><span class="mi">255</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>    <span class="c1"># scale</span>
+    <span class="n">img</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">img</span><span class="p">[:,:,</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">],</span><span class="mi">3</span><span class="p">,</span><span class="n">axis</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>            <span class="c1"># add color channels</span>
+    <span class="n">img</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">applyColorMap</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">colormap</span><span class="p">)</span>           <span class="c1"># rainbow, blue=low, red=high</span>
+    <span class="n">window</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">namedWindow</span><span class="p">(</span><span class="n">title</span><span class="p">,</span><span class="n">cv2</span><span class="o">.</span><span class="n">WINDOW_NORMAL</span><span class="p">)</span>
+    <span class="n">cv2</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">title</span><span class="p">,</span> <span class="n">img</span><span class="p">)</span>                      <span class="c1"># show what we&#39;ve got</span>
+    <span class="n">cv2</span><span class="o">.</span><span class="n">resizeWindow</span><span class="p">(</span><span class="n">title</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">imWidth</span><span class="o">/</span><span class="mi">2</span><span class="p">),</span><span class="nb">int</span><span class="p">(</span><span class="n">imWidth</span><span class="o">/</span><span class="mi">2</span><span class="p">))</span>   <span class="c1"># zoom out (can use two-finger-scroll to zoom in)</span></div>
+
+<span class="c1"># draw weights for all layers</span>
+<div class="viewcode-block" id="draw_weights"><a class="viewcode-back" href="../viz.html#viz.draw_weights">[docs]</a><span class="k">def</span> <span class="nf">draw_weights</span><span class="p">(</span><span class="n">weights</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="s2">&quot;weights&quot;</span><span class="p">,</span> <span class="n">colormap</span><span class="o">=</span><span class="n">rainbow</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">weights</span><span class="p">)):</span>
+        <span class="n">draw_weights_layer</span><span class="p">(</span><span class="n">weights</span><span class="p">[</span><span class="n">l</span><span class="p">],</span> <span class="n">title</span><span class="o">=</span><span class="s2">&quot;weights_layer&quot;</span><span class="o">+</span><span class="nb">str</span><span class="p">(</span><span class="n">l</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="random_color"><a class="viewcode-back" href="../viz.html#viz.random_color">[docs]</a><span class="k">def</span> <span class="nf">random_color</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="c1"># seed is a cheap way of keeping the color from changing too frequently</span>
+    <span class="k">if</span> <span class="n">seed</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="n">seed</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span>     <span class="c1"># +1 because it gives you green for seed=0   :-)</span>
+    <span class="k">return</span> <span class="p">(</span><span class="mi">128</span><span class="o">+</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">127</span><span class="p">),</span> <span class="mi">128</span><span class="o">+</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">127</span><span class="p">),</span> <span class="mi">128</span><span class="o">+</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">127</span><span class="p">)</span> <span class="p">)</span></div>
+
+
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">This actually draws the &#39;oscilloscope&#39; display for the various activations</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="draw_activations"><a class="viewcode-back" href="../viz.html#viz.draw_activations">[docs]</a><span class="k">def</span> <span class="nf">draw_activations</span><span class="p">(</span><span class="n">screen</span><span class="p">,</span> <span class="n">weights</span><span class="p">,</span> <span class="n">mono_audio</span><span class="p">,</span> <span class="n">xs</span><span class="p">,</span> \
+    <span class="n">title</span><span class="o">=</span><span class="s2">&quot;activations (cyan=input, green=output)&quot;</span><span class="p">,</span> <span class="n">gains</span><span class="o">=</span><span class="p">[</span><span class="mi">3</span><span class="p">,</span><span class="mf">0.3</span><span class="p">]):</span>
+    <span class="n">screen</span> <span class="o">*=</span> <span class="mi">0</span>                                <span class="c1"># clear the screen</span>
+    <span class="n">mono_audio</span> <span class="o">*=</span> <span class="n">gains</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>                     <span class="c1"># apply gain before activation</span>
+
+    <span class="n">n_weights</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">weights</span><span class="p">)</span>
+    <span class="n">max_amp_pixels</span> <span class="o">=</span> <span class="n">imHeight</span><span class="o">/</span><span class="p">(</span><span class="n">n_weights</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="o">/</span><span class="mi">2</span>    <span class="c1"># maximum amplitude in pixels</span>
+    <span class="n">dy0</span> <span class="o">=</span> <span class="mi">2</span><span class="o">*</span><span class="n">max_amp_pixels</span>                     <span class="c1"># spacing between zero lines</span>
+
+    <span class="c1"># Input layer</span>
+    <span class="n">act</span> <span class="o">=</span> <span class="n">mono_audio</span>                             <span class="c1"># first activation is just the input</span>
+    <span class="n">y0</span> <span class="o">=</span> <span class="n">max_amp_pixels</span>                          <span class="c1"># zero line</span>
+    <span class="c1"># minux sign in the following is because computer graphics are &#39;upside down&#39;</span>
+    <span class="n">ys_in</span> <span class="o">=</span> <span class="p">(</span> <span class="n">y0</span> <span class="o">-</span> <span class="n">max_amp_pixels</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span> <span class="n">act</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="nb">len</span><span class="p">(</span><span class="n">xs</span><span class="p">)],</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int</span><span class="p">)</span>
+    <span class="n">pts_in</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">xs</span><span class="p">,</span><span class="n">ys_in</span><span class="p">)))</span>      <span class="c1"># pair up xs &amp; ys for input</span>
+    <span class="n">cv2</span><span class="o">.</span><span class="n">polylines</span><span class="p">(</span><span class="n">screen</span><span class="p">,[</span><span class="n">pts_in</span><span class="p">],</span><span class="kc">False</span><span class="p">,</span><span class="n">cyan</span><span class="p">)</span>   <span class="c1"># draw lines connecting the points</span>
+
+    <span class="c1"># now compute and show other layer activations</span>
+    <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_weights</span><span class="p">):</span>
+        <span class="n">y0</span> <span class="o">=</span> <span class="n">max_amp_pixels</span> <span class="o">+</span> <span class="p">(</span><span class="n">l</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">dy0</span>                         <span class="c1"># zero line</span>
+        <span class="n">act</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">act</span><span class="p">,</span> <span class="n">weights</span><span class="p">[</span><span class="n">l</span><span class="p">])</span>        <span class="c1"># activations are a new waveform</span>
+        <span class="n">ys_out</span> <span class="o">=</span> <span class="p">(</span> <span class="n">y0</span> <span class="o">-</span> <span class="n">max_amp_pixels</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span>  <span class="n">act</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="nb">len</span><span class="p">(</span><span class="n">xs</span><span class="p">)],</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int</span><span class="p">)</span> <span class="c1"># gains[1] gets applied to weights directly</span>
+        <span class="n">ys_out</span> <span class="o">=</span> <span class="n">ys_out</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="n">layer_out_dim</span><span class="p">]</span>            <span class="c1"># don&#39;t show more than is supposed to be there</span>
+        <span class="n">pts_out</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">xs</span><span class="p">,</span><span class="n">ys_out</span><span class="p">)))</span>    <span class="c1"># pair up xs &amp; ys for output</span>
+        <span class="n">cv2</span><span class="o">.</span><span class="n">polylines</span><span class="p">(</span><span class="n">screen</span><span class="p">,[</span><span class="n">pts_out</span><span class="p">],</span><span class="kc">False</span><span class="p">,</span> <span class="n">random_color</span><span class="p">(</span><span class="n">l</span><span class="p">))</span>
+
+    <span class="c1"># draw window showing activations</span>
+    <span class="n">window</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">namedWindow</span><span class="p">(</span><span class="n">title</span><span class="p">,</span><span class="n">cv2</span><span class="o">.</span><span class="n">WINDOW_NORMAL</span><span class="p">)</span>   <span class="c1"># allow the window containing the image to be resized</span>
+    <span class="n">cv2</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">title</span><span class="p">,</span> <span class="n">screen</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">))</span>
+    <span class="k">return</span></div>
+
+
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">this is a trigger function for the oscilloscope</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="find_trigger"><a class="viewcode-back" href="../viz.html#viz.find_trigger">[docs]</a><span class="k">def</span> <span class="nf">find_trigger</span><span class="p">(</span><span class="n">mono_audio</span><span class="p">,</span> <span class="n">thresh</span><span class="o">=</span><span class="mf">0.02</span><span class="p">,</span> <span class="n">pos_slope</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>  <span class="c1"># thresh = trigger level</span>
+    <span class="n">start_ind</span> <span class="o">=</span> <span class="kc">None</span>     <span class="c1"># this is where in the buffer the trigger should go; None</span>
+    <span class="n">shift_forward</span> <span class="o">=</span> <span class="n">shift</span><span class="p">(</span><span class="n">mono_audio</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">cval</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">pos_slope</span><span class="p">:</span>
+        <span class="n">inds</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">mono_audio</span> <span class="o">&gt;=</span> <span class="n">thresh</span><span class="p">,</span> <span class="n">shift_forward</span> <span class="o">&lt;=</span> <span class="n">thresh</span><span class="p">))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">inds</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">logical_and</span><span class="p">(</span><span class="n">mono_audio</span> <span class="o">&lt;=</span> <span class="n">thresh</span><span class="p">,</span> <span class="n">shift_forward</span> <span class="o">&gt;=</span> <span class="n">thresh</span><span class="p">))</span>
+    <span class="k">if</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">inds</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">):</span>
+        <span class="n">start_ind</span> <span class="o">=</span> <span class="n">inds</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">start_ind</span></div>
+
+
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Just prints the keys one can use. wish I could get arrow keys working</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="instructions"><a class="viewcode-back" href="../viz.html#viz.instructions">[docs]</a><span class="k">def</span> <span class="nf">instructions</span><span class="p">():</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Keys: &quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  = : increase input gain&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  &#39; : decrease input gain&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  ] : increase output gain&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  [ : decrease output gain&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  - : increase trigger level&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  p : decrease trigger level&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;      Two-finger scroll will zoom in&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Note: windows start out reduced in display size; can be resized at will.&quot;</span><span class="p">)</span></div>
+    <span class="c1">#print(&quot;      (Don&#39;t beleive the &#39;Zoom:%&#39; display; it doesn&#39;t reflect proper array size)&quot;)</span>
+
+
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd"># acquires (syntesizes or reads in) all weights of networks</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="get_weights"><a class="viewcode-back" href="../viz.html#viz.get_weights">[docs]</a><span class="k">def</span> <span class="nf">get_weights</span><span class="p">(</span><span class="n">names</span><span class="p">,</span> <span class="n">layer_dims</span><span class="p">):</span>
+    <span class="c1"># name: a string selector for the type of weights initialization</span>
+    <span class="c1"># in_layer_dim, out_layer_dim: dimensions of the weights array</span>
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">names</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">layer_dims</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span><span class="s2">&quot;names needs to be one less than layer_dims&quot;</span>
+
+    <span class="n">weights</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;layer_dims =&quot;</span><span class="p">,</span><span class="n">layer_dims</span><span class="p">)</span>
+    <span class="n">n_weights</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">layer_dims</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;n_weights = &quot;</span><span class="p">,</span><span class="n">n_weights</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_weights</span><span class="p">):</span>
+        <span class="n">name</span> <span class="o">=</span> <span class="n">names</span><span class="p">[</span><span class="n">l</span><span class="p">]</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;     get_weights: l=&quot;</span><span class="p">,</span><span class="n">l</span><span class="p">)</span>
+        <span class="n">in_layer_dim</span><span class="p">,</span> <span class="n">out_layer_dim</span> <span class="o">=</span> <span class="n">layer_dims</span><span class="p">[</span><span class="n">l</span><span class="p">],</span> <span class="n">layer_dims</span><span class="p">[</span><span class="n">l</span><span class="o">+</span><span class="mi">1</span><span class="p">]</span>
+        <span class="n">ny</span><span class="p">,</span> <span class="n">nx</span> <span class="o">=</span> <span class="p">(</span><span class="n">in_layer_dim</span><span class="p">,</span> <span class="n">out_layer_dim</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="s1">&#39;cos&#39;</span> <span class="o">==</span> <span class="n">name</span><span class="p">):</span>
+            <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">nx</span><span class="p">)</span>
+            <span class="n">y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">ny</span><span class="p">)</span>
+            <span class="n">xv</span><span class="p">,</span> <span class="n">yv</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">meshgrid</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="n">y</span><span class="p">)</span>
+            <span class="n">weights</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="mf">0.5</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="mi">2</span><span class="o">*</span><span class="mf">3.14</span><span class="o">*</span><span class="mi">4</span><span class="o">*</span><span class="n">xv</span><span class="p">)</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="mi">2</span><span class="o">*</span><span class="mf">3.14</span><span class="o">*</span><span class="mi">4</span><span class="o">*</span><span class="n">yv</span><span class="p">))</span>
+            <span class="c1">#weights += 0.1*np.random.rand(layer_in_dim, layer_out_dim)</span>
+        <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;rand&#39;</span> <span class="o">==</span> <span class="n">name</span><span class="p">):</span>
+            <span class="n">weights</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="n">ny</span><span class="p">,</span> <span class="n">nx</span><span class="p">)</span><span class="o">-</span><span class="mf">0.5</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;FNNAnalysis&#39;</span> <span class="o">==</span> <span class="n">name</span><span class="p">):</span>
+            <span class="n">freq_subbands</span> <span class="o">=</span> <span class="mi">256</span>
+            <span class="n">hop_size</span> <span class="o">=</span> <span class="mi">1024</span>
+            <span class="n">fs</span> <span class="o">=</span> <span class="mf">44100.</span>
+            <span class="n">sig_length</span> <span class="o">=</span> <span class="mi">8192</span>
+            <span class="n">expected_time_frames</span> <span class="o">=</span> <span class="n">sig_length</span><span class="o">/</span><span class="nb">float</span><span class="p">(</span><span class="n">hop_size</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+
+            <span class="n">net</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">transforms</span><span class="o">.</span><span class="n">FNNAnalysis</span><span class="p">(</span><span class="n">ft_size</span><span class="o">=</span><span class="n">freq_subbands</span><span class="p">)</span>
+            <span class="n">w</span> <span class="o">=</span> <span class="n">net</span><span class="o">.</span><span class="n">fnn_analysis_real</span><span class="o">.</span><span class="n">weight</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;weight data = &quot;</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">param</span> <span class="ow">in</span> <span class="n">net</span><span class="o">.</span><span class="n">parameters</span><span class="p">():</span>
+                <span class="k">pass</span>
+                 <span class="c1">#print(&quot;FNNAnalysis param = &quot;,param)</span>
+            <span class="n">w</span> <span class="o">=</span> <span class="n">param</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+            <span class="c1">#weights.append(st.transforms.core_modulation(ny, nx))</span>
+            <span class="n">weights</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">w</span><span class="p">)</span>
+            <span class="n">signal</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">from_numpy</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="mi">8192</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">))</span>
+            <span class="n">out</span> <span class="o">=</span> <span class="n">net</span><span class="p">(</span><span class="n">signal</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;out.size = &quot;</span><span class="p">,</span><span class="n">out</span><span class="o">.</span><span class="n">size</span><span class="p">())</span>
+        <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;FNNSynthesis&#39;</span> <span class="o">==</span> <span class="n">name</span><span class="p">):</span>
+             <span class="n">weights</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="n">st</span><span class="o">.</span><span class="n">transforms</span><span class="o">.</span><span class="n">core_modulation</span><span class="p">(</span><span class="n">ny</span><span class="p">,</span> <span class="n">nx</span><span class="p">)))</span>
+        <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;ft&#39;</span> <span class="o">==</span> <span class="n">name</span><span class="p">):</span>
+            <span class="n">w</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">fft</span><span class="o">.</span><span class="n">fft</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="n">in_layer_dim</span><span class="p">))</span>
+            <span class="n">w</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">real</span><span class="p">(</span><span class="n">w</span><span class="p">)</span>
+            <span class="n">weights</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">w</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;ift&#39;</span> <span class="o">==</span> <span class="n">name</span><span class="p">):</span>
+            <span class="n">weights</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">fft</span><span class="o">.</span><span class="n">ifft</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="n">in_layer_dim</span><span class="p">)))</span>
+
+    <span class="k">return</span> <span class="n">weights</span></div>
+
+
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd"># &#39;Oscilloscope&#39; routine; audio buffer &amp; sample rate; make the audio buffer a little bigger than &#39;needed&#39;,</span>
+<span class="sd">#  to avoid showing zero-pads (which are primarily there for &#39;safety&#39;)</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<div class="viewcode-block" id="scope"><a class="viewcode-back" href="../viz.html#viz.scope">[docs]</a><span class="k">def</span> <span class="nf">scope</span><span class="p">(</span><span class="n">weights</span><span class="p">,</span> <span class="n">buf_size</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span> <span class="n">fs</span><span class="o">=</span><span class="mi">44100</span><span class="p">):</span>
+
+    <span class="n">default_mic</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">default_microphone</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;oscilloscope: listening on &quot;</span><span class="p">,</span><span class="n">default_mic</span><span class="p">)</span>
+    <span class="n">instructions</span><span class="p">()</span>
+
+    <span class="n">trig_level</span> <span class="o">=</span> <span class="mf">0.001</span>   <span class="c1"># trigger value for input waveform</span>
+    <span class="n">gains</span> <span class="o">=</span> <span class="p">[</span><span class="mi">10</span><span class="p">,</span><span class="mi">1</span><span class="p">]</span>    <span class="c1"># gains for input and output</span>
+
+    <span class="c1"># allocate storage for &#39;screen&#39;</span>
+    <span class="n">screen</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">imHeight</span><span class="p">,</span><span class="n">imWidth</span><span class="p">,</span><span class="mi">3</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span> <span class="c1"># 3=color channels</span>
+    <span class="n">xs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">imWidth</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">int</span><span class="p">)</span>                  <span class="c1"># x values of pixels (time samples)</span>
+    <span class="n">draw_weights</span><span class="p">(</span><span class="n">weights</span><span class="p">)</span>
+
+    <span class="k">while</span> <span class="p">(</span><span class="mi">1</span><span class="p">):</span>                             <span class="c1"># keep looping until someone stops this</span>
+        <span class="k">with</span> <span class="n">default_mic</span><span class="o">.</span><span class="n">recorder</span><span class="p">(</span><span class="n">samplerate</span><span class="o">=</span><span class="n">fs</span><span class="p">)</span> <span class="k">as</span> <span class="n">mic</span><span class="p">:</span>
+            <span class="n">audio_data</span> <span class="o">=</span> <span class="n">mic</span><span class="o">.</span><span class="n">record</span><span class="p">(</span><span class="n">numframes</span><span class="o">=</span><span class="n">buf_size</span><span class="p">)</span>  <span class="c1"># get some audio from the mic</span>
+
+        <span class="n">bgn</span> <span class="o">=</span> <span class="n">find_trigger</span><span class="p">(</span><span class="n">audio_data</span><span class="p">[:,</span><span class="mi">0</span><span class="p">],</span> <span class="n">thresh</span><span class="o">=</span><span class="n">trig_level</span><span class="p">)</span>    <span class="c1"># try to trigger</span>
+        <span class="n">layer_in_dim</span> <span class="o">=</span> <span class="n">layer_act_dims</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>                     <span class="c1"># length of input layer</span>
+        <span class="k">if</span> <span class="n">bgn</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">end</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">bgn</span><span class="o">+</span><span class="n">layer_in_dim</span><span class="p">,</span> <span class="n">buf_size</span><span class="p">)</span>                 <span class="c1"># don&#39;t go off the end of the buffer</span>
+            <span class="n">pad_len</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">layer_in_dim</span> <span class="o">-</span> <span class="p">(</span><span class="n">end</span><span class="o">-</span><span class="n">bgn</span><span class="p">)</span> <span class="p">)</span>           <span class="c1"># might have to pad with zeros</span>
+            <span class="n">padded_data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">pad</span><span class="p">(</span><span class="n">audio_data</span><span class="p">[</span><span class="n">bgn</span><span class="p">:</span><span class="n">end</span><span class="p">,</span><span class="mi">0</span><span class="p">],(</span><span class="mi">0</span><span class="p">,</span><span class="n">pad_len</span><span class="p">),</span><span class="s1">&#39;constant&#39;</span><span class="p">,</span><span class="n">constant_values</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="n">draw_activations</span><span class="p">(</span><span class="n">screen</span><span class="p">,</span> <span class="n">weights</span><span class="p">,</span> <span class="n">padded_data</span><span class="p">,</span> <span class="n">xs</span><span class="p">,</span> <span class="n">gains</span><span class="o">=</span><span class="n">gains</span><span class="p">)</span>             <span class="c1"># draw left channel</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">draw_activations</span><span class="p">(</span><span class="n">screen</span><span class="p">,</span> <span class="n">weights</span><span class="p">,</span> <span class="n">audio_data</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="n">layer_in_dim</span><span class="p">,</span><span class="mi">0</span><span class="p">]</span><span class="o">*</span><span class="mi">0</span><span class="p">,</span> <span class="n">xs</span><span class="p">,</span> <span class="n">gains</span><span class="o">=</span><span class="n">gains</span><span class="p">)</span>   <span class="c1"># draw zero line</span>
+
+
+        <span class="n">key</span> <span class="o">=</span> <span class="n">cv2</span><span class="o">.</span><span class="n">waitKeyEx</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0xFF</span>         <span class="c1"># keyboard input</span>
+
+        <span class="c1"># Couldn&#39;t get arrow keys to work.</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">key</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">key</span> <span class="o">!=</span><span class="mi">255</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;key = &#39;</span><span class="p">,</span><span class="n">key</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">ord</span><span class="p">(</span><span class="s1">&#39;q&#39;</span><span class="p">)</span> <span class="o">==</span> <span class="n">key</span><span class="p">:</span>       <span class="c1"># quit key</span>
+            <span class="k">break</span>
+        <span class="k">elif</span> <span class="nb">ord</span><span class="p">(</span><span class="s1">&#39;=&#39;</span><span class="p">)</span> <span class="o">==</span> <span class="n">key</span><span class="p">:</span>  <span class="c1"># equal sign</span>
+            <span class="n">gains</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*=</span> <span class="mf">1.1</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;gains =&quot;</span><span class="p">,</span><span class="n">gains</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">ord</span><span class="p">(</span><span class="s2">&quot;&#39;&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="n">key</span><span class="p">:</span>  <span class="c1"># signle quote</span>
+            <span class="n">gains</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*=</span> <span class="mf">0.9</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;gains =&quot;</span><span class="p">,</span><span class="n">gains</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">ord</span><span class="p">(</span><span class="s1">&#39;]&#39;</span><span class="p">)</span> <span class="o">==</span> <span class="n">key</span><span class="p">:</span>  <span class="c1">#  right bracket</span>
+            <span class="n">gains</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">*=</span> <span class="mf">1.1</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;gains =&quot;</span><span class="p">,</span><span class="n">gains</span><span class="p">)</span>
+            <span class="n">weights</span> <span class="o">=</span> <span class="p">[</span> <span class="n">x</span><span class="o">*</span><span class="mf">1.1</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">weights</span> <span class="p">]</span>
+            <span class="n">draw_weights</span><span class="p">(</span><span class="n">weights</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">ord</span><span class="p">(</span><span class="s1">&#39;[&#39;</span><span class="p">)</span> <span class="o">==</span> <span class="n">key</span><span class="p">:</span>  <span class="c1"># left bracket</span>
+            <span class="n">gains</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">*=</span> <span class="mf">0.9</span>
+            <span class="n">weights</span> <span class="o">=</span> <span class="p">[</span> <span class="n">x</span><span class="o">*</span><span class="mf">0.9</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">weights</span> <span class="p">]</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;gains =&quot;</span><span class="p">,</span><span class="n">gains</span><span class="p">)</span>
+            <span class="n">draw_weights</span><span class="p">(</span><span class="n">weights</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">ord</span><span class="p">(</span><span class="s1">&#39;-&#39;</span><span class="p">)</span> <span class="o">==</span> <span class="n">key</span><span class="p">:</span>     <span class="c1"># minus sign</span>
+            <span class="n">trig_level</span> <span class="o">+=</span> <span class="mf">0.001</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;trig_level =&quot;</span><span class="p">,</span><span class="n">trig_level</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">ord</span><span class="p">(</span><span class="s2">&quot;p&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="n">key</span><span class="p">:</span>     <span class="c1"># letter p</span>
+            <span class="n">trig_level</span> <span class="o">-=</span> <span class="mf">0.001</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;trig_level =&quot;</span><span class="p">,</span><span class="n">trig_level</span><span class="p">)</span>
+    <span class="k">return</span></div>
+
+
+<div class="viewcode-block" id="main"><a class="viewcode-back" href="../viz.html#viz.main">[docs]</a><span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Set up the &#39;t ransform&#39; weights  TODO: load these from PyTorch model</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1">#weights = get_weights([&#39;cos&#39;,&#39;rand&#39;], layer_act_dims)    # true fourier transform</span>
+    <span class="c1">#weights = get_weights([&#39;FNNAnalysis&#39;,&#39;FNNSynthesis&#39;], layer_act_dims)   # stylianos&#39; layers</span>
+    <span class="n">weights</span> <span class="o">=</span> <span class="n">get_weights</span><span class="p">([</span><span class="s1">&#39;ft&#39;</span><span class="p">,</span><span class="s1">&#39;ift&#39;</span><span class="p">],</span> <span class="n">layer_act_dims</span><span class="p">)</span>    <span class="c1"># true fourier transform</span>
+
+
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Call the oscilloscope in order to visualize activations</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">scope</span><span class="p">(</span><span class="n">weights</span><span class="p">,</span> <span class="n">buf_size</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">layer_act_dims</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">*</span><span class="mf">1.5</span><span class="p">))</span>
+
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    # Note: by using multiprocessing or threading, could run scope &amp; other visualizations simultaneously</span>
+<span class="sd">    # not sure how the audio library would like that maybe via threading so they all share the same</span>
+<span class="sd">    # input buffer</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">return</span></div>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+
+<span class="c1"># EOF</span>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper"><div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2018, Scott H. Hawley.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 1.7.5</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.11</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>
