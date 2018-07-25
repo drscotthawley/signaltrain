@@ -99,9 +99,3 @@ ENV/
 
 # mypy
 .mypy_cache/
-
-# sphinx
-docs/_build
-
-# Mac files
-.DS_Store
