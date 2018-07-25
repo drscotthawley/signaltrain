@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 __author__ = 'Scott H. Hawley'
 __copyright__ = 'Scott H. Hawley'
-# this is the clean one
 
 import numpy as np
 import torch
@@ -119,6 +118,23 @@ def train_model(model, optimizer, criterion, lambdas, train_gen, val_gen, cmd_ar
     return model
 
 
+# One additional model evaluation on Test or Val data
+def eval_model(model, criterion, lambdas, losslogger, sig_length, chunk_size, device, effect,
+    fs=44100, X=None, Y=None, mu_law=False):
+    # X_test=input, Y_test=target (optional_cal be regenerated)
+    print("\n\nEvaluating model: loss_num=",end="")
+    if (None == X):
+        X_test, Y_test = st.audio.gen_audio(int(sig_length/5), device, chunk_size=chunk_size,
+            effect=effect, input_var=X_train, target_var=Y_train)
+        # st.audio.gen_audio(sig_length, chunk_size=chunk_size, effect=effect)
+    Y_pred, layers_pred = model(X)    # run network forward
+    loss = calc_loss(Y_pred, Y_test, criterion, lambdas)
+    loss_num = loss.data.cpu().numpy()
+    print(loss_num)
+    outfile = 'final'
+    print("Saving final Test evaluation report to ",outfile,".*",sep="")
+    st.utils.make_report(X, Y, Ypred, losslogger, outfile=outfile, mu_law=mu_law)
+    return
 
 
 #-------------------------------------------------------------------------------
@@ -134,32 +150,31 @@ def main():
     #-------------------------------
     # Parse command line arguments
     #-------------------------------
-    #chunk_max = 15000     # roughly the maximum model size that will fit in memory on Titan X Pascal GPU
-    # if you immediately get OOM errors, decrease chunk_max
-    #batch_size = 100      # one big batch (e.g. 8000) runs faster per epoch, but smaller batches converge faster
-    #fs = 44100
-    #length = fs * 5     # 5 seconds of audio
-
+    chunk_max = 15000     # roughly the maximum model size that will fit in memory on Titan X Pascal GPU
+                          # if you immediately get OOM errors, decrease chunk_max
+    batch_size = 100      # one big batch (e.g. 8000) runs faster per epoch, but smaller batches converge faster
+    fs = 44100
+    length = fs * 5     # 5 seconds of audio
 
     parser = argparse.ArgumentParser(description='trains SignalTrain effects mapper', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--batch', default=20, type=int, help="Batch size")  # TODO: get batch_size>1 working
-    parser.add_argument('--change', default=5, type=int, help="Changed data every this many epochs")
-    parser.add_argument('--chunk', default=512, type=int, help="Length of each 'chunk' or window that input signal is chopped up into")
+    parser.add_argument('--batch', default=batch_size, type=int, help="Batch size")  # TODO: get batch_size>1 working
+    parser.add_argument('--change', default=20, type=int, help="Changed data every this many epochs")
+    parser.add_argument('--chunk', default=chunk_max, type=int, help="Length of each 'chunk' or window that input signal is chopped up into")
     parser.add_argument('--effect', default='comp', type=str,
-                    help="Audio effect to try. Names are in signaltrain/audio.py. (default='comp' for compressor)")
+                    help="Audio effect to try. Names are in signaltrain/audio.py. (default='ta' for time-alignment)")
     parser.add_argument('--epochs', default=10000, type=int, help="Number of iterations to train for")
-    parser.add_argument('--fs', default=44100, type=int, help="Sample rate in Hertz")
+    parser.add_argument('--fs', default=fs, type=int, help="Sample rate in Hertz")
     parser.add_argument('--lambdas', default='0.0,0.0', type=str,
                     help="Comma-separated list of regularization penalty parameters, (L1, L2)")
-    parser.add_argument('--length', default=8192, type=int, help="Length of each audio signal (then cut up into chunks)")
+    parser.add_argument('--length', default=length, type=int, help="Length of each audio signal (then cut up into chunks)")
     parser.add_argument('--lr', default=1e-6, type=float, help="Initial learning rate")
-    parser.add_argument('--model', choices=['specsg'],
-                    default='specsg', type=str, help="Choice of model to use")
+    parser.add_argument('--model', choices=['specsg','spectral','seq2seq','wavenet','specfb','manyto1'],
+                    default='specsg', type=str, help="Choice of model lto use")
     parser.add_argument('--name', default='run', type=str, help="Name/tag for this run. Logging goes into dir with this name. ")
     #TODO: decision: should it overwrite existing directory names, or create a new dir with, e.g. "_1" to avoid overwites?
     #      Answer: neither. We append the time & date of the run start to the name of the run, so they're all unique
     parser.add_argument("--parallel", help="Run in data-parallel mode",action="store_true")  # default=False
-    parser.add_argument('--plot', default=10, type=int, help="Plot report every this many epochs")
+    parser.add_argument('--plot', default=20, type=int, help="Plot report every this many epochs")
     parser.add_argument('--save', default=20, type=int, help="Save checkpoint (if best) every this many epochs")
 
     # user can load a checkpoint file from a previous run: Either recall 'everything' (--resume) or just the weights (--init)
@@ -199,20 +214,43 @@ def main():
                   #  but the regression model should be turned into a multi-class classifier
                   # which means the target & output 'Y' values should get one-hot encoded
 
-
-    if ('specsg' == args.model):
+    if ('seq2seq' == args.model):
+        model = st.models.Seq2Seq()
+        retain_graph=True
+    elif ('specsg' == args.model):
         model = st.models.SpecShrinkGrow_catri_skipadd(chunk_size=args.chunk)
+    elif ('specfb' == args.model):
+        model = st.models.SpecFrontBack(chunk_size=args.chunk)
+    elif ('manyto1' == args.model):
+        model = st.models.FNNManyToOne(chunk_size=args.chunk)  # terrible
+    elif ('wavenet' == args.model):
+        model = st.models.WaveNet()
+        mu_law = True
     else:
-        raise ValueError("specsg is the only current model")
+        model = st.models.SpecEncDec(ft_size=args.chunk)
 
+    # Default is serial, not data-parallel execution. But --parallel flag will enable DP
+    #   In my experiments, DataParallel runs no faster than single-GPU for the same
+    #   batch size.  It will allow you to run with larger batches, but...that's it.
+    if args.parallel and (torch.cuda.device_count() > 1):
+        print("Let's use", torch.cuda.device_count(), "GPUs!")
+        model = torch.nn.DataParallel(model)
 
     #----------------------------------------------------------------
     #  Set additional training specs based on which model was chosen
     #----------------------------------------------------------------
-
     losslogger = st.utils.LossLogger(name=args.name)
-    criterion =  torch.nn.MSELoss()
-    optimizer = torch.optim.Adam( model.parameters(), lr=args.lr, eps=5e-6)    #,  amsgrad=True)
+
+    if (args.model != 'wavenet'):
+        criterion =  torch.nn.MSELoss()
+        optimizer = torch.optim.Adam( model.parameters(), lr=args.lr, eps=5e-6)    #,  amsgrad=True)
+    else:
+        raise ValueError("Sorry, model 'wavenet' isn't ready yet.")
+        criterion = torch.nn.CrossEntropyLoss()
+        lambdas = [1.0]  # replace any args.lambdas value because there's only one loss in wavenet
+        optimizer = torch.optim.Adam( model.parameters(), lr=0.01)
+
+
     #-------------------------------------------------------------------
     # Checkpoint recovery (if requested) OR initialize just the weights
     #-------------------------------------------------------------------
@@ -246,6 +284,12 @@ def main():
         start_epoch=start_epoch, losslogger=losslogger, fs=fs,
         retain_graph=retain_graph, mu_law=mu_law)
 
+    #--------------------------------
+    # Evaluate model on Test dataset
+    #--------------------------------
+    # Broken for now
+    #eval_model(model, criteria, lambdas, losslogger, sig_length, chunk_size, device, args.effect,
+    #    fs=fs, effect=args.effect, mu_law=mu_law, dataset=dataset)
     return
 
 if __name__ == '__main__':
