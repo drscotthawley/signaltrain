@@ -275,8 +275,9 @@ def main():
     """
     Set up the 't ransform' weights  TODO: load these from PyTorch model
     """
-    weights = get_weights(['cos','rand'], layer_act_dims)    # true fourier transform
+    #weights = get_weights(['cos','rand'], layer_act_dims)    # true fourier transform
     #weights = get_weights(['FNNAnalysis','FNNSynthesis'], layer_act_dims)   # stylianos' layers
+    weights = get_weights(['ft','ift'], layer_act_dims)    # true fourier transform
 
 
     """

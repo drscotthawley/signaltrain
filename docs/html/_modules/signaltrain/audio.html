@@ -1,0 +1,721 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>signaltrain.audio &#8212; signaltrain 0.0.1 documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for signaltrain.audio</h1><div class="highlight"><pre>
+<span></span>
+<span class="n">__author__</span> <span class="o">=</span> <span class="s1">&#39;S.H. Hawley&#39;</span>
+
+<span class="c1"># imports</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">from</span> <span class="nn">torch.autograd</span> <span class="k">import</span> <span class="n">Variable</span>
+<span class="kn">import</span> <span class="nn">librosa</span>
+<span class="kn">from</span> <span class="nn">multiprocessing.pool</span> <span class="k">import</span> <span class="n">ThreadPool</span> <span class="k">as</span> <span class="n">Pool</span>
+<span class="kn">from</span> <span class="nn">functools</span> <span class="k">import</span> <span class="n">partial</span>
+<span class="kn">import</span> <span class="nn">scipy.signal</span> <span class="k">as</span> <span class="nn">signal</span>
+<span class="kn">from</span> <span class="nn">torch.utils.data.dataset</span> <span class="k">import</span> <span class="n">Dataset</span>
+<span class="kn">from</span> <span class="nn">.</span> <span class="k">import</span> <span class="n">utils</span> <span class="k">as</span> <span class="n">st_utils</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">random</span>
+
+<span class="c1"># optional utility for applying effects via sox</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span> <span class="nn">pysox</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="n">no_pysox</span> <span class="o">=</span> <span class="kc">True</span>
+
+<span class="c1">#import matplotlib.pyplot as plt   # just for debugging</span>
+<span class="c1"># Note: torchaudio is also a thing! requires sox. See http://pytorch.org/audio/, https://github.com/pytorch/audio</span>
+
+
+
+
+<span class="c1"># reads a file. currently maps stereo to mono by throwing out the right channel</span>
+<span class="c1">#   TODO: eventually we&#39;d want to handle stereo somehow (e.g. for stereo effects)</span>
+<div class="viewcode-block" id="read_audio_file"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.read_audio_file">[docs]</a><span class="k">def</span> <span class="nf">read_audio_file</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">sr</span><span class="o">=</span><span class="mi">44100</span><span class="p">):</span>
+    <span class="n">signal</span><span class="p">,</span> <span class="n">sr</span> <span class="o">=</span> <span class="n">librosa</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">sr</span><span class="o">=</span><span class="n">sr</span><span class="p">,</span> <span class="n">mono</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="c1"># convert to mono</span>
+    <span class="k">return</span> <span class="n">signal</span><span class="p">,</span> <span class="n">sr</span></div>
+
+<div class="viewcode-block" id="write_audio_file"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.write_audio_file">[docs]</a><span class="k">def</span> <span class="nf">write_audio_file</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">signal</span><span class="p">,</span> <span class="n">sr</span><span class="o">=</span><span class="mi">44100</span><span class="p">):</span>
+    <span class="n">librosa</span><span class="o">.</span><span class="n">output</span><span class="o">.</span><span class="n">write_wav</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">signal</span><span class="p">,</span> <span class="n">sr</span><span class="p">)</span>
+    <span class="k">return</span></div>
+
+
+<span class="c1"># this generates a time-decaying sine wave, similar to plucking a string</span>
+<div class="viewcode-block" id="gen_pluck"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.gen_pluck">[docs]</a><span class="k">def</span> <span class="nf">gen_pluck</span><span class="p">(</span><span class="n">length</span><span class="p">,</span> <span class="n">t</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">amp</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">freq</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">decay</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">t0</span><span class="o">=</span><span class="mf">0.0</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">amp</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">amp</span> <span class="o">=</span> <span class="p">(</span><span class="mf">0.6</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span><span class="o">+</span><span class="mf">0.3</span><span class="p">)</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">([</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">])</span>
+    <span class="k">if</span> <span class="n">freq</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">freq</span> <span class="o">=</span> <span class="mi">300</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">decay</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">decay</span> <span class="o">=</span> <span class="mi">10</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">t</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">t</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="n">length</span><span class="p">)</span>
+    <span class="n">pluck</span> <span class="o">=</span> <span class="n">amp</span> <span class="o">*</span> <span class="n">torch</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">decay</span> <span class="o">*</span> <span class="p">(</span><span class="n">t</span><span class="o">-</span><span class="n">t0</span><span class="p">)</span> <span class="p">)</span> <span class="o">*</span> <span class="n">torch</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">freq</span><span class="o">*</span> <span class="p">(</span><span class="n">t</span><span class="o">-</span><span class="n">t0</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">pluck</span></div>
+
+
+<span class="c1"># this operates using only one processor, and time-aligns one &#39;event&#39; (which may be a &#39;pluck&#39;)</span>
+<div class="viewcode-block" id="ta_oneproc"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.ta_oneproc">[docs]</a><span class="k">def</span> <span class="nf">ta_oneproc</span><span class="p">(</span><span class="n">input_sigs</span><span class="p">,</span> <span class="n">target_sigs</span><span class="p">,</span> <span class="n">chunk_size</span><span class="p">,</span> <span class="n">event_len</span><span class="p">,</span> <span class="n">num_events</span><span class="p">,</span> <span class="n">strength</span><span class="p">,</span> <span class="n">chunk_index</span><span class="p">):</span>
+    <span class="c1">#  strength is a 0..1 &#39;knob&#39; that parameterizes the amount of time-shift applied: 0=no effect, 1=full (&#39;on the grid&#39;)</span>
+    <span class="n">sig_length</span> <span class="o">=</span> <span class="n">chunk_size</span>
+
+    <span class="n">base_event</span> <span class="o">=</span> <span class="n">gen_pluck</span><span class="p">(</span> <span class="nb">int</span><span class="p">(</span><span class="n">event_len</span><span class="o">*</span><span class="mf">1.5</span><span class="p">))</span>            <span class="c1"># &#39;base event&#39; just the preceding event, to the right</span>
+    <span class="n">target_sigs</span><span class="p">[</span><span class="n">chunk_index</span><span class="p">,</span> <span class="mi">0</span><span class="p">:</span> <span class="n">base_event</span><span class="o">.</span><span class="n">size</span><span class="p">()[</span><span class="o">-</span><span class="mi">1</span><span class="p">]]</span> <span class="o">=</span> <span class="n">base_event</span>
+    <span class="n">input_sigs</span><span class="p">[</span><span class="n">chunk_index</span><span class="p">,</span> <span class="mi">0</span><span class="p">:</span> <span class="n">base_event</span><span class="o">.</span><span class="n">size</span><span class="p">()[</span><span class="o">-</span><span class="mi">1</span><span class="p">]]</span> <span class="o">=</span> <span class="n">base_event</span>
+
+    <span class="k">for</span> <span class="n">eventnum</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_events</span><span class="p">):</span>
+        <span class="n">event</span> <span class="o">=</span> <span class="n">gen_pluck</span><span class="p">(</span><span class="n">event_len</span><span class="p">)</span>
+
+        <span class="c1"># figure out where the erroneous input event should be, and where the target event should be</span>
+        <span class="n">grid_index</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">eventnum</span><span class="o">*</span><span class="n">event_len</span><span class="p">)</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">chunk_size</span><span class="o">/</span><span class="mi">2</span><span class="p">)</span>          <span class="c1"># this is the target index value for &quot;hard editing&quot; / &quot;on the grid&quot;</span>
+        <span class="n">random_shift</span> <span class="o">=</span>  <span class="nb">int</span> <span class="p">(</span> <span class="p">(</span><span class="n">event_len</span><span class="o">/</span><span class="mi">4</span><span class="p">)</span><span class="o">*</span> <span class="p">(</span><span class="mi">2</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="p">)</span>   <span class="c1"># amount &#39;off&#39; to place input event from the grid; the 1/4 is just an estimation</span>
+
+        <span class="n">input_index</span> <span class="o">=</span> <span class="n">grid_index</span> <span class="o">+</span> <span class="n">random_shift</span>
+        <span class="n">target_index</span> <span class="o">=</span>  <span class="nb">int</span><span class="p">(</span> <span class="n">strength</span><span class="o">*</span><span class="n">grid_index</span> <span class="o">+</span> <span class="p">(</span><span class="mf">1.0</span><span class="o">-</span><span class="n">strength</span><span class="p">)</span><span class="o">*</span><span class="n">input_index</span> <span class="p">)</span>   <span class="c1"># here&#39;s where the strength knob does its work</span>
+
+        <span class="n">itarget_bgn</span> <span class="o">=</span> <span class="n">target_index</span>
+        <span class="n">itarget_end</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">itarget_bgn</span> <span class="o">+</span> <span class="n">event_len</span><span class="p">,</span> <span class="n">sig_length</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">target_sigs</span><span class="p">[</span><span class="n">chunk_index</span><span class="p">,</span> <span class="n">itarget_bgn</span><span class="p">:</span><span class="n">itarget_end</span><span class="p">]</span> <span class="o">=</span> <span class="n">event</span><span class="p">[</span><span class="mi">0</span> <span class="p">:</span> <span class="n">itarget_end</span> <span class="o">-</span> <span class="n">itarget_bgn</span><span class="p">]</span>
+
+        <span class="c1"># input: randomly shift it for input</span>
+        <span class="n">iinput_bgn</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">input_index</span> <span class="p">)</span>  <span class="c1"># just don&#39;t let it go off the front end; TODO: this works but is sloppy;</span>
+        <span class="n">iinput_end</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">iinput_bgn</span> <span class="o">+</span> <span class="n">event_len</span><span class="p">,</span> <span class="n">sig_length</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">input_sigs</span><span class="p">[</span><span class="n">chunk_index</span><span class="p">,</span> <span class="n">iinput_bgn</span><span class="p">:</span><span class="n">iinput_end</span><span class="p">]</span> <span class="o">=</span> <span class="n">event</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span> <span class="n">iinput_end</span> <span class="o">-</span> <span class="n">iinput_bgn</span> <span class="p">]</span>
+
+    <span class="k">return</span> <span class="c1"># note we don&#39;t have to return arrays because ThreadPool shares memory</span></div>
+
+
+<span class="c1"># this runs in parallel, calling ta_oneproc many times to do multiple time-alignments</span>
+<div class="viewcode-block" id="gen_timealign_pairs"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.gen_timealign_pairs">[docs]</a><span class="k">def</span> <span class="nf">gen_timealign_pairs</span><span class="p">(</span><span class="n">sig_length</span><span class="p">,</span> <span class="n">num_events</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">parallel</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">strength</span><span class="o">=</span><span class="mf">1.0</span><span class="p">):</span>
+    <span class="n">input_sigs</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">num_chunks</span><span class="p">,</span> <span class="n">chunk_size</span><span class="p">))</span>
+    <span class="n">target_sigs</span> <span class="o">=</span> <span class="n">input_sigs</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span><span class="c1">#  0.1*torch.randn((num_chunks, chunk_size))</span>
+    <span class="n">sig_length</span> <span class="o">=</span> <span class="n">chunk_size</span>
+    <span class="n">event_len</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span> <span class="n">sig_length</span> <span class="o">/</span> <span class="p">(</span><span class="n">num_events</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span> <span class="p">)</span>
+    <span class="n">chunk_indices</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_chunks</span><span class="p">)</span> <span class="p">)</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">parallel</span><span class="p">):</span>
+        <span class="n">pool</span> <span class="o">=</span> <span class="n">Pool</span><span class="p">()</span>
+        <span class="n">pool</span><span class="o">.</span><span class="n">map</span><span class="p">(</span> <span class="n">partial</span><span class="p">(</span><span class="n">ta_oneproc</span><span class="p">,</span> <span class="n">input_sigs</span><span class="p">,</span> <span class="n">target_sigs</span><span class="p">,</span> <span class="n">chunk_size</span><span class="p">,</span> <span class="n">event_len</span><span class="p">,</span> <span class="n">num_events</span><span class="p">,</span> <span class="n">strength</span><span class="p">),</span> <span class="n">chunk_indices</span><span class="p">)</span>
+        <span class="n">pool</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+        <span class="n">pool</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">chunk_index</span> <span class="ow">in</span> <span class="n">chunk_indices</span><span class="p">:</span>
+            <span class="n">ta_oneproc</span><span class="p">(</span><span class="n">input_sigs</span><span class="p">,</span> <span class="n">target_sigs</span><span class="p">,</span> <span class="n">chunk_size</span><span class="p">,</span> <span class="n">event_len</span><span class="p">,</span> <span class="n">num_events</span><span class="p">,</span> <span class="n">strength</span><span class="p">,</span> <span class="n">chunk_index</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">input_sigs</span><span class="p">,</span> <span class="n">target_sigs</span></div>
+
+
+<span class="c1"># generate pitch-shifted pair, on one processor</span>
+<div class="viewcode-block" id="psp_oneproc"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.psp_oneproc">[docs]</a><span class="k">def</span> <span class="nf">psp_oneproc</span><span class="p">(</span><span class="n">input_sigs</span><span class="p">,</span> <span class="n">target_sigs</span><span class="p">,</span> <span class="n">fs</span><span class="p">,</span> <span class="n">amp_fac</span><span class="p">,</span> <span class="n">freq_fac</span><span class="p">,</span> <span class="n">num_waves</span><span class="p">,</span> <span class="n">chunk_index</span><span class="p">):</span>
+    <span class="n">sig_length</span> <span class="o">=</span> <span class="n">input_sigs</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_waves</span><span class="p">):</span>
+        <span class="c1"># randomize the signal</span>
+        <span class="n">amp</span> <span class="o">=</span> <span class="mf">0.2</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">rand</span><span class="p">()</span>    <span class="c1"># stay bounded well below 1.0</span>
+        <span class="n">freq</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="p">(</span> <span class="mi">400</span> <span class="o">+</span> <span class="mi">400</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">rand</span><span class="p">()</span> <span class="p">)</span>
+
+        <span class="c1"># learn the adaptive filter for the following input -&gt; target pair: different amp, freq &amp; phase</span>
+        <span class="n">input_sigs</span><span class="p">[</span><span class="n">chunk_index</span><span class="p">]</span>  <span class="o">+=</span>           <span class="n">amp</span> <span class="o">*</span> <span class="n">torch</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span>           <span class="n">freq</span> <span class="o">*</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">sig_length</span><span class="p">)</span> <span class="o">/</span> <span class="n">fs</span><span class="p">)</span>
+        <span class="n">target_sigs</span><span class="p">[</span><span class="n">chunk_index</span><span class="p">]</span> <span class="o">+=</span> <span class="n">amp_fac</span> <span class="o">*</span> <span class="n">amp</span> <span class="o">*</span> <span class="n">torch</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">freq_fac</span> <span class="o">*</span> <span class="n">freq</span> <span class="o">*</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">sig_length</span><span class="p">)</span> <span class="o">/</span> <span class="n">fs</span><span class="p">)</span>
+    <span class="k">return</span>  <span class="c1"># note we don&#39;t have to return arrays because ThreadPool shares memory</span></div>
+
+
+<span class="c1"># this generates groups of &#39;pitch shifted&#39; pairs.  Not a true pitch-shifting effect, just something</span>
+<span class="c1">#   I used temporarily until RenderMan VST host got upgraded to Python 3.6</span>
+<span class="c1"># Runs in parallel, calls psp_oneproc many times</span>
+<div class="viewcode-block" id="gen_pitch_shifted_pairs"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.gen_pitch_shifted_pairs">[docs]</a><span class="k">def</span> <span class="nf">gen_pitch_shifted_pairs</span><span class="p">(</span><span class="n">chunk_size</span><span class="p">,</span> <span class="n">fs</span><span class="p">,</span> <span class="n">amp_fac</span><span class="p">,</span> <span class="n">freq_fac</span><span class="p">,</span> <span class="n">num_waves</span><span class="p">,</span> <span class="n">num_chunks</span><span class="p">,</span> <span class="n">parallel</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="n">input_sigs</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">num_chunks</span><span class="p">,</span> <span class="n">chunk_size</span><span class="p">))</span>
+        <span class="n">target_sigs</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">num_chunks</span><span class="p">,</span> <span class="n">chunk_size</span><span class="p">))</span>
+        <span class="c1"># generate them in parallel threads that all share the input_sigs and target_sigs arrays</span>
+        <span class="n">chunk_indices</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_chunks</span><span class="p">)</span> <span class="p">)</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">parallel</span><span class="p">):</span>
+            <span class="n">pool</span> <span class="o">=</span> <span class="n">Pool</span><span class="p">()</span>
+            <span class="n">pool</span><span class="o">.</span><span class="n">map</span><span class="p">(</span> <span class="n">partial</span><span class="p">(</span><span class="n">psp_oneproc</span><span class="p">,</span> <span class="n">input_sigs</span><span class="p">,</span> <span class="n">target_sigs</span><span class="p">,</span> <span class="n">fs</span><span class="p">,</span> <span class="n">amp_fac</span><span class="p">,</span> <span class="n">freq_fac</span><span class="p">,</span> <span class="n">num_waves</span><span class="p">),</span> <span class="n">chunk_indices</span><span class="p">)</span>
+            <span class="n">pool</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+            <span class="n">pool</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">chunk_index</span> <span class="ow">in</span> <span class="n">chunk_indices</span><span class="p">:</span>
+                <span class="n">psp_oneproc</span><span class="p">(</span><span class="n">input_sigs</span><span class="p">,</span> <span class="n">target_sigs</span><span class="p">,</span> <span class="n">fs</span><span class="p">,</span> <span class="n">amp_fac</span><span class="p">,</span> <span class="n">freq_fac</span><span class="p">,</span> <span class="n">num_waves</span><span class="p">,</span> <span class="n">chunk_index</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">input_sigs</span><span class="p">,</span> <span class="n">target_sigs</span></div>
+
+
+<span class="c1"># Generates various &#39;fake&#39; audio wave forms -- synthetic data</span>
+<div class="viewcode-block" id="gen_input_sample"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.gen_input_sample">[docs]</a><span class="k">def</span> <span class="nf">gen_input_sample</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">chooser</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="n">t</span><span class="p">)</span><span class="o">*</span><span class="mf">0.0</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">chooser</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">):</span>
+        <span class="n">chooser</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="mi">4</span><span class="p">)</span>
+    <span class="c1">#chooser = 6</span>
+    <span class="c1">#print(&quot;   make_input_signal: chooser = &quot;,chooser)</span>
+    <span class="k">if</span> <span class="p">(</span><span class="mi">0</span> <span class="o">==</span> <span class="n">chooser</span><span class="p">):</span>
+        <span class="n">amp</span> <span class="o">=</span> <span class="mf">0.4</span><span class="o">+</span><span class="mf">0.4</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span>
+        <span class="n">freq</span> <span class="o">=</span> <span class="mi">30</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span>    <span class="c1"># sin, with random start &amp; freq</span>
+        <span class="n">t0</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">amp</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">freq</span><span class="o">*</span><span class="p">(</span><span class="n">t</span><span class="o">-</span><span class="n">t0</span><span class="p">))</span>
+        <span class="n">x</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">t</span> <span class="o">&lt;</span> <span class="n">t0</span><span class="p">)]</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="k">return</span> <span class="n">x</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="mi">1</span> <span class="o">==</span> <span class="n">chooser</span><span class="p">):</span>                <span class="c1"># fixed sine wave</span>
+        <span class="n">freq</span> <span class="o">=</span> <span class="mi">5</span><span class="o">+</span><span class="mi">150</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span>
+        <span class="n">amp</span> <span class="o">=</span> <span class="mf">0.4</span><span class="o">+</span><span class="mf">0.4</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span>
+        <span class="k">global</span> <span class="n">global_freq</span>
+        <span class="n">global_freq</span> <span class="o">=</span> <span class="n">freq</span>
+        <span class="k">return</span> <span class="n">amp</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">freq</span><span class="o">*</span><span class="n">t</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="mi">2</span> <span class="o">==</span> <span class="n">chooser</span><span class="p">):</span>                  <span class="c1"># noisy &quot;pluck&quot;</span>
+        <span class="n">amp0</span> <span class="o">=</span> <span class="p">(</span><span class="mf">0.6</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span><span class="o">+</span><span class="mf">0.3</span><span class="p">)</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">([</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">])</span>
+        <span class="n">t0</span> <span class="o">=</span> <span class="p">(</span><span class="mi">2</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="mf">0.3</span>
+        <span class="n">freq</span> <span class="o">=</span> <span class="mi">6400</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">amp0</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">freq</span><span class="o">*</span> <span class="p">(</span><span class="n">t</span><span class="o">-</span><span class="n">t0</span><span class="p">))</span>
+        <span class="n">decay</span> <span class="o">=</span> <span class="mi">8</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">decay</span> <span class="o">*</span> <span class="p">(</span><span class="n">t</span><span class="o">-</span><span class="n">t0</span><span class="p">)</span> <span class="p">)</span> <span class="o">*</span> <span class="n">x</span>   <span class="c1"># decaying envelope</span>
+        <span class="n">x</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">t</span> <span class="o">&lt;</span> <span class="n">t0</span><span class="p">)]</span> <span class="o">=</span> <span class="mi">0</span>   <span class="c1"># without this, it grow exponentially &#39;to the left&#39;</span>
+        <span class="k">return</span> <span class="n">x</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="mi">3</span> <span class="o">==</span> <span class="n">chooser</span><span class="p">):</span>                <span class="c1"># ramp up then down</span>
+        <span class="n">height</span> <span class="o">=</span> <span class="p">(</span><span class="mf">0.4</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span><span class="o">+</span><span class="mf">0.2</span><span class="p">)</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">([</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">])</span>
+        <span class="n">width</span> <span class="o">=</span> <span class="mf">0.3</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span><span class="o">/</span><span class="mi">4</span>   <span class="c1"># half-width actually</span>
+        <span class="n">t0</span> <span class="o">=</span> <span class="mi">2</span><span class="o">*</span><span class="n">width</span> <span class="o">+</span> <span class="mf">0.4</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span> <span class="c1"># make sure it fits</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">height</span><span class="o">*</span> <span class="p">(</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">t</span><span class="o">-</span><span class="n">t0</span><span class="p">)</span><span class="o">/</span><span class="n">width</span> <span class="p">)</span>
+        <span class="n">x</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">t</span> <span class="o">&lt;</span> <span class="p">(</span><span class="n">t0</span><span class="o">-</span><span class="n">width</span><span class="p">))]</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">x</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">t</span> <span class="o">&gt;</span> <span class="p">(</span><span class="n">t0</span><span class="o">+</span><span class="n">width</span><span class="p">))]</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="c1">#x += 0.01</span>
+        <span class="k">return</span> <span class="n">x</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="mi">4</span> <span class="o">==</span> <span class="n">chooser</span><span class="p">):</span>                <span class="c1"># &#39;box&#39;</span>
+        <span class="n">height</span> <span class="o">=</span> <span class="p">(</span><span class="mf">0.3</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span><span class="o">+</span><span class="mf">0.2</span><span class="p">)</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">([</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">])</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">height</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">t1</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span><span class="o">/</span><span class="mi">2</span>
+        <span class="n">t2</span> <span class="o">=</span> <span class="n">t1</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span><span class="o">/</span><span class="mi">2</span>
+        <span class="n">x</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">t</span><span class="o">&lt;</span><span class="n">t1</span><span class="p">)]</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="n">x</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">t</span><span class="o">&gt;</span><span class="n">t2</span><span class="p">)]</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="c1">#x += 0.01</span>
+        <span class="k">return</span> <span class="n">x</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="mi">5</span> <span class="o">==</span> <span class="n">chooser</span><span class="p">):</span>                 <span class="c1"># &quot;bunch of spikes&quot;</span>
+        <span class="n">n_spikes</span> <span class="o">=</span> <span class="mi">100</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_spikes</span><span class="p">):</span>   <span class="c1"># arbitrarily make a &#39;spike&#39; somewhere, surrounded by silence</span>
+          <span class="n">loc</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span><span class="o">*</span><span class="nb">len</span><span class="p">(</span><span class="n">t</span><span class="p">)</span><span class="o">-</span><span class="mi">2</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span>
+          <span class="n">height</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span><span class="o">-</span><span class="mf">0.5</span>    <span class="c1"># -0.5...0.5</span>
+          <span class="n">x</span><span class="p">[</span><span class="n">loc</span><span class="p">]</span> <span class="o">=</span> <span class="n">height</span>
+          <span class="n">x</span><span class="p">[</span><span class="n">loc</span><span class="o">+</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">height</span><span class="o">/</span><span class="mi">2</span>  <span class="c1"># widen the spike a bit</span>
+          <span class="n">x</span><span class="p">[</span><span class="n">loc</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">height</span><span class="o">/</span><span class="mi">2</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">x</span> <span class="o">+</span> <span class="mf">0.1</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">normal</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span><span class="n">scale</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span><span class="n">size</span><span class="o">=</span><span class="n">x</span><span class="o">.</span><span class="n">size</span><span class="p">)</span>    <span class="c1"># throw in noise</span>
+        <span class="k">return</span> <span class="n">x</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="mi">6</span> <span class="o">==</span> <span class="n">chooser</span><span class="p">):</span>                <span class="c1"># white noise</span>
+        <span class="n">amp</span> <span class="o">=</span> <span class="mf">0.2</span><span class="o">+</span><span class="mf">0.2</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span>
+        <span class="c1">#amp = 2.0*np.random.random()</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">amp</span><span class="o">*</span><span class="p">(</span><span class="mi">2</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">x</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="mi">7</span> <span class="o">==</span> <span class="n">chooser</span><span class="p">):</span>              <span class="c1"># noisy &#39;pluck&#39;</span>
+        <span class="n">amp0</span> <span class="o">=</span> <span class="p">(</span><span class="mf">0.7</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span><span class="o">+</span><span class="mf">0.2</span><span class="p">)</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">([</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">])</span>
+        <span class="n">t0</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span><span class="o">*</span><span class="mf">0.5</span>   <span class="c1"># start late by some amount</span>
+        <span class="n">freq</span> <span class="o">=</span> <span class="mi">6400</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">amp0</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">freq</span><span class="o">*</span> <span class="p">(</span><span class="n">t</span><span class="o">-</span><span class="n">t0</span><span class="p">))</span>
+        <span class="n">amp_n</span> <span class="o">=</span> <span class="p">(</span><span class="mf">0.4</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span><span class="o">+</span><span class="mf">0.2</span><span class="p">)</span>
+        <span class="n">noise</span> <span class="o">=</span> <span class="n">amp_n</span><span class="o">*</span><span class="p">(</span><span class="mi">2</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1">#noise centered around 0</span>
+        <span class="n">x</span> <span class="o">+=</span> <span class="n">noise</span>
+        <span class="n">decay</span> <span class="o">=</span> <span class="mi">8</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">decay</span> <span class="o">*</span> <span class="p">(</span><span class="n">t</span><span class="o">-</span><span class="n">t0</span><span class="p">)</span> <span class="p">)</span> <span class="o">*</span> <span class="n">x</span>   <span class="c1"># decaying envelope</span>
+        <span class="n">x</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">t</span> <span class="o">&lt;</span> <span class="n">t0</span><span class="p">)]</span> <span class="o">=</span> <span class="mi">0</span>   <span class="c1"># without this, it grow exponentially &#39;to the left&#39;</span>
+        <span class="k">return</span> <span class="n">x</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">x</span><span class="o">=</span> <span class="mf">0.5</span><span class="o">*</span><span class="p">(</span><span class="n">gen_input_sample</span><span class="p">(</span><span class="n">t</span><span class="p">)</span><span class="o">+</span><span class="n">gen_input_sample</span><span class="p">(</span><span class="n">t</span><span class="p">))</span> <span class="c1"># superposition of previous</span>
+        <span class="k">return</span> <span class="n">x</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="n">t</span><span class="p">)</span>   <span class="c1"># failsafe return just in case of typo above</span></div>
+
+
+<span class="c1"># low pass filter</span>
+<div class="viewcode-block" id="lowpass"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.lowpass">[docs]</a><span class="k">def</span> <span class="nf">lowpass</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">fc_fac</span><span class="o">=</span><span class="mf">1.0</span><span class="p">):</span>
+    <span class="n">fc</span> <span class="o">=</span> <span class="n">fc_fac</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+    <span class="n">b</span><span class="p">,</span> <span class="n">a</span> <span class="o">=</span> <span class="n">signal</span><span class="o">.</span><span class="n">butter</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">fc</span><span class="p">,</span> <span class="n">analog</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">zi</span> <span class="o">=</span> <span class="n">signal</span><span class="o">.</span><span class="n">lfilter_zi</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">a</span><span class="p">)</span>
+    <span class="n">z</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">signal</span><span class="o">.</span><span class="n">lfilter</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">zi</span><span class="o">=</span><span class="n">zi</span><span class="o">*</span><span class="n">x</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">z</span></div>
+
+
+<span class="c1"># this is a echo or delay effect  TODO: note the &#39;effect&#39; string name for this is &#39;delay&#39;, not &#39;echo&#39;. Pick one.</span>
+<div class="viewcode-block" id="echo"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.echo">[docs]</a><span class="k">def</span> <span class="nf">echo</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">delay_samples</span><span class="o">=</span><span class="mi">1487</span><span class="p">,</span> <span class="n">echoes</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">ratio</span><span class="o">=</span><span class="mf">0.6</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">):</span>
+    <span class="c1"># ratio = redution ratio</span>
+    <span class="n">y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">dtype</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">echoes</span><span class="p">):</span>
+        <span class="n">ip1</span> <span class="o">=</span> <span class="n">i</span><span class="o">+</span><span class="mi">1</span>
+        <span class="n">delay_length</span> <span class="o">=</span> <span class="n">ip1</span> <span class="o">*</span> <span class="n">delay_samples</span>
+        <span class="n">x_delayed</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">roll</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">delay_length</span><span class="p">)</span>
+        <span class="n">x_delayed</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="n">delay_length</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">y</span> <span class="o">+=</span> <span class="nb">pow</span><span class="p">(</span><span class="n">ratio</span><span class="p">,</span> <span class="n">ip1</span><span class="p">)</span> <span class="o">*</span> <span class="n">x_delayed</span>
+    <span class="k">return</span> <span class="n">y</span></div>
+
+
+<span class="c1"># simple compressor effect, code thanks to Eric Tarr @hackaudio</span>
+<span class="c1">#def compressor(x, thresh=-24, ratio=2, attack=2000, dtype=np.float32): # attack=2000 used for real audio</span>
+<div class="viewcode-block" id="compressor"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.compressor">[docs]</a><span class="k">def</span> <span class="nf">compressor</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">thresh</span><span class="o">=-</span><span class="mi">24</span><span class="p">,</span> <span class="n">ratio</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">attack</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">):</span>
+
+    <span class="n">fc</span> <span class="o">=</span> <span class="mf">1.0</span><span class="o">/</span><span class="p">(</span><span class="n">attack</span><span class="p">)</span>               <span class="c1"># this is like 1/attack time</span>
+    <span class="n">b</span><span class="p">,</span> <span class="n">a</span> <span class="o">=</span> <span class="n">signal</span><span class="o">.</span><span class="n">butter</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">fc</span><span class="p">,</span> <span class="n">analog</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">zi</span> <span class="o">=</span> <span class="n">signal</span><span class="o">.</span><span class="n">lfilter_zi</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">a</span><span class="p">)</span>
+    <span class="n">dB</span> <span class="o">=</span> <span class="mi">20</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">log10</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">+</span> <span class="mf">1e-8</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">dtype</span><span class="p">)</span>
+    <span class="n">in_env</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">signal</span><span class="o">.</span><span class="n">lfilter</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">dB</span><span class="p">,</span> <span class="n">zi</span><span class="o">=</span><span class="n">zi</span><span class="o">*</span><span class="n">dB</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>  <span class="c1"># input envelope calculation</span>
+    <span class="n">out_env</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="n">in_env</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">dtype</span><span class="p">)</span>               <span class="c1"># output envelope</span>
+    <span class="n">i</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">in_env</span> <span class="o">&gt;</span>  <span class="n">thresh</span><span class="p">)</span>          <span class="c1"># compress where input env exceeds thresh</span>
+    <span class="n">out_env</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">thresh</span> <span class="o">+</span> <span class="p">(</span><span class="n">in_env</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">-</span><span class="n">thresh</span><span class="p">)</span><span class="o">/</span><span class="n">ratio</span>
+    <span class="n">gain</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">power</span><span class="p">(</span><span class="mf">10.0</span><span class="p">,(</span><span class="n">out_env</span><span class="o">-</span><span class="n">in_env</span><span class="p">)</span><span class="o">/</span><span class="mi">10</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">dtype</span><span class="p">)</span>
+    <span class="n">y</span> <span class="o">=</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">*</span> <span class="n">gain</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">dtype</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">y</span></div>
+
+
+
+<span class="c1"># Modified from https://bastibe.de/2012-11-02-real-time-signal-processing-in-python.html</span>
+<div class="viewcode-block" id="Limiter"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.Limiter">[docs]</a><span class="k">class</span> <span class="nc">Limiter</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">attack_coeff</span><span class="p">,</span> <span class="n">release_coeff</span><span class="p">,</span> <span class="n">delay</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">delay_index</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">envelope</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">gain</span> <span class="o">=</span> <span class="mf">0.5</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">delay</span> <span class="o">=</span> <span class="n">delay</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">delay_line</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">delay</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">release_coeff</span> <span class="o">=</span> <span class="n">release_coeff</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">attack_coeff</span> <span class="o">=</span> <span class="n">attack_coeff</span>
+
+<div class="viewcode-block" id="Limiter.limit"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.Limiter.limit">[docs]</a>    <span class="k">def</span> <span class="nf">limit</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">signal</span><span class="p">,</span> <span class="n">threshold</span><span class="p">):</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">copy</span><span class="p">(</span><span class="n">signal</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">signal</span><span class="p">)):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">delay_line</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">delay_index</span><span class="p">]</span> <span class="o">=</span> <span class="n">signal</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">delay_index</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">delay_index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">%</span> <span class="bp">self</span><span class="o">.</span><span class="n">delay</span>
+
+            <span class="c1"># calculate an envelope of the signal</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">envelope</span> <span class="o">*=</span> <span class="bp">self</span><span class="o">.</span><span class="n">release_coeff</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">envelope</span>  <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">abs</span><span class="p">(</span><span class="n">signal</span><span class="p">[</span><span class="n">i</span><span class="p">]),</span> <span class="bp">self</span><span class="o">.</span><span class="n">envelope</span><span class="p">)</span>
+
+            <span class="c1"># have self.gain go towards a desired limiter gain</span>
+            <span class="c1">#print(&quot;i, self.envelope, threshold = &quot;,i, self.envelope, threshold)</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">envelope</span> <span class="o">&gt;</span> <span class="n">threshold</span><span class="p">:</span>
+                <span class="n">target_gain</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1</span><span class="o">+</span><span class="n">threshold</span><span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">envelope</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">target_gain</span> <span class="o">=</span> <span class="mf">1.0</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">gain</span> <span class="o">=</span> <span class="p">(</span> <span class="bp">self</span><span class="o">.</span><span class="n">gain</span><span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">attack_coeff</span> <span class="o">+</span>
+                          <span class="n">target_gain</span><span class="o">*</span><span class="p">(</span><span class="mi">1</span><span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">attack_coeff</span><span class="p">)</span> <span class="p">)</span>
+
+            <span class="c1"># limit the delayed signal</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">delay_line</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">delay_index</span><span class="p">]</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">gain</span>
+        <span class="k">return</span> <span class="n">out</span></div></div>
+
+
+
+<div class="viewcode-block" id="apply_sox_effect"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.apply_sox_effect">[docs]</a><span class="k">def</span> <span class="nf">apply_sox_effect</span><span class="p">(</span><span class="n">signal</span><span class="p">,</span> <span class="n">fxstr</span><span class="p">,</span> <span class="n">sr</span><span class="o">=</span><span class="mi">44100</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    This writes signal to a .wav file, processes it sox to another file, loads that and returns it.</span>
+
+<span class="sd">     signal:  a numpy list of numbers; the audio signal</span>
+<span class="sd">     sr:      the sample rate in Hz, must be an integer</span>
+<span class="sd">     fxstr:   a semicolon-separated string starting with the effect name followed by parameter values in order</span>
+<span class="sd">              e.g., &quot;lowpass;500&quot; or &quot;vol;18dB&quot; or &#39;compand;0.3,0.8;-50&#39;, or if you&#39;re feeling ambitious,..</span>
+<span class="sd">                    fxstr=&#39;ladspa;/usr/lib/ladspa/mbeq_1197.so;mbeq;-2;-3;-3;-6;-9;-9;-10;-8;-6;-5;-4;-3;-1;0;0;0&#39;</span>
+<span class="sd">              See the sox docs for more on effects: http://sox.sourceforge.net/sox.html#EFFECTS</span>
+<span class="sd">              (Why semicolon-separated?  Because sox looks for both commas and colons!)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">no_pysox</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span><span class="s2">&quot;You don&#39;t have pysox installed.  Can&#39;t apply sox effect&quot;</span><span class="p">)</span>
+    <span class="n">inpath</span><span class="p">,</span> <span class="n">outpath</span> <span class="o">=</span> <span class="s1">&#39;in.wav&#39;</span><span class="p">,</span> <span class="s1">&#39;out.wav&#39;</span>
+    <span class="n">librosa</span><span class="o">.</span><span class="n">output</span><span class="o">.</span><span class="n">write_wav</span><span class="p">(</span><span class="n">inpath</span><span class="p">,</span> <span class="n">signal</span><span class="p">,</span> <span class="n">sr</span><span class="p">)</span>                     <span class="c1"># write the input audio to a file</span>
+    <span class="n">tmp</span> <span class="o">=</span> <span class="n">fxstr</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;;&#39;</span><span class="p">)</span>
+    <span class="n">fxname</span> <span class="o">=</span> <span class="n">tmp</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">fxvals</span> <span class="o">=</span> <span class="p">[</span><span class="nb">str</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">tmp</span><span class="p">[</span><span class="mi">1</span><span class="p">:]]</span>
+    <span class="n">effectparams</span> <span class="o">=</span> <span class="p">[(</span><span class="n">fxname</span><span class="p">,</span> <span class="n">fxvals</span><span class="p">),]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;effectparams=&quot;</span><span class="p">,</span><span class="n">effectparams</span><span class="p">)</span>
+    <span class="n">app</span> <span class="o">=</span> <span class="n">pysox</span><span class="o">.</span><span class="n">CSoxApp</span><span class="p">(</span><span class="n">inpath</span><span class="p">,</span> <span class="n">outpath</span><span class="p">,</span> <span class="n">effectparams</span><span class="o">=</span><span class="n">effectparams</span><span class="p">)</span>   <span class="c1"># apply the sox effect &amp; get new file</span>
+    <span class="n">app</span><span class="o">.</span><span class="n">flow</span><span class="p">()</span>
+
+    <span class="n">out_signal</span><span class="p">,</span> <span class="n">sr</span> <span class="o">=</span>  <span class="n">librosa</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">outpath</span><span class="p">,</span> <span class="n">sr</span><span class="o">=</span><span class="n">sr</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out_signal</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="nb">len</span><span class="p">(</span><span class="n">signal</span><span class="p">)]</span></div>
+
+
+<div class="viewcode-block" id="functions"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.functions">[docs]</a><span class="k">def</span> <span class="nf">functions</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">f</span><span class="o">=</span><span class="s1">&#39;id&#39;</span><span class="p">):</span>                <span class="c1"># function to be learned</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">       &#39;functions&#39; is a repository of various audio effects, which in some cases are</span>
+<span class="sd">        literally just simple (time-independent) functions</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="s1">&#39;id&#39;</span> <span class="o">==</span> <span class="n">f</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">x</span> 						<span class="c1"># identity function</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;x^2&#39;</span><span class="o">==</span><span class="n">f</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">x</span><span class="o">**</span><span class="mi">2</span>   					<span class="c1"># given an x on [0,1], this should work</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;clip&#39;</span> <span class="o">==</span> <span class="n">f</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="o">-</span><span class="mf">0.3</span><span class="p">,</span><span class="mf">0.3</span><span class="p">)</span>  	<span class="c1"># hard limiter, clips signal</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;sin&#39;</span> <span class="o">==</span> <span class="n">f</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="mi">4</span><span class="o">*</span><span class="n">x</span><span class="p">)</span>              <span class="c1"># just made this up</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;dec_cos&#39;</span> <span class="o">==</span> <span class="n">f</span><span class="p">):</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span> <span class="o">*</span> <span class="n">x</span> <span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="mi">40</span><span class="o">*</span> <span class="n">x</span><span class="p">)</span> <span class="c1"># decaying cosine</span>
+        <span class="k">return</span> <span class="n">y</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;wiggle&#39;</span> <span class="o">==</span> <span class="n">f</span><span class="p">):</span>
+        <span class="n">y</span>  <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="o">*</span><span class="p">(</span><span class="n">x</span><span class="o">+</span><span class="mf">0.7</span><span class="p">))</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="mi">20</span><span class="o">*</span><span class="n">x</span><span class="p">)</span>			<span class="c1"># decaying cos  wave</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="n">y</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="mi">40</span><span class="o">*</span><span class="p">(</span><span class="n">x</span><span class="o">-</span><span class="mf">0.5</span><span class="p">)</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span>					<span class="c1"># plus  gaussian</span>
+        <span class="k">return</span> <span class="n">y</span>
+    <span class="c1"># low pass filter</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;lpf&#39;</span> <span class="o">==</span><span class="n">f</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">lowpass</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;delay&#39;</span> <span class="o">==</span> <span class="n">f</span><span class="p">)</span> <span class="ow">or</span> <span class="p">(</span><span class="s1">&#39;echo&#39;</span> <span class="o">==</span> <span class="n">f</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">echo</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;comp&#39;</span> <span class="o">==</span> <span class="n">f</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">compressor</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;lim&#39;</span> <span class="o">==</span> <span class="n">f</span><span class="p">):</span>
+        <span class="n">limiter</span> <span class="o">=</span> <span class="n">Limiter</span><span class="p">(</span><span class="o">.</span><span class="mi">1</span><span class="p">,</span>  <span class="mf">0.5</span><span class="p">,</span> <span class="mi">30</span><span class="p">)</span>          <span class="c1"># TODO: slow, always re-allocating delay line</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="n">limiter</span><span class="o">.</span><span class="n">limit</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">)</span>
+        <span class="n">limiter</span> <span class="o">=</span> <span class="kc">None</span>                           <span class="c1"># forced garbage collection.</span>
+        <span class="k">return</span> <span class="n">y</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;od&#39;</span> <span class="o">==</span> <span class="n">f</span><span class="p">):</span>   <span class="c1"># really dumb/simple overdrive: a tanh!</span>
+        <span class="n">a</span> <span class="o">=</span> <span class="mf">3.0</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">tanh</span><span class="p">(</span><span class="n">a</span><span class="o">*</span><span class="n">x</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">y</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;sox;&#39;</span> <span class="ow">in</span> <span class="n">f</span><span class="p">):</span>                           <span class="c1"># it&#39;s a sox effect, parse a semicolon-separated string</span>
+        <span class="n">fxstr</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;sox;&#39;</span> <span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">)</span>            <span class="c1"># e.g. f = &quot;sox,lowpass,500&quot;; ignore the &quot;sox;&quot; part</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot; Calling apply_sox_effect with fxstr =&quot;</span><span class="p">,</span><span class="n">fxstr</span><span class="p">,</span><span class="s1">&#39;, len(x) =&#39;</span><span class="p">,</span><span class="nb">len</span><span class="p">(</span><span class="n">x</span><span class="p">))</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="n">apply_sox_effect</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">fxstr</span><span class="o">=</span><span class="n">fxstr</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;....and we&#39;re back, len(y) = &quot;</span><span class="p">,</span><span class="nb">len</span><span class="p">(</span><span class="n">y</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">y</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;functions: error invalid type: &quot;</span><span class="o">+</span><span class="n">f</span><span class="p">)</span></div>
+
+
+<span class="c1"># generator for sytnthetic waveforms via gen_input_sample()</span>
+<div class="viewcode-block" id="synthaudio_generator"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.synthaudio_generator">[docs]</a><span class="k">def</span> <span class="nf">synthaudio_generator</span><span class="p">(</span><span class="n">seq_size</span><span class="o">=</span><span class="mi">8192</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">):</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="n">num</span><span class="o">=</span><span class="n">seq_size</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">dtype</span><span class="p">)</span>
+    <span class="n">sample_type</span> <span class="o">=</span> <span class="mi">7</span>   <span class="c1"># hard coding &quot;noisy pluck&quot; for now</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="n">clip</span> <span class="o">=</span> <span class="n">gen_input_sample</span><span class="p">(</span><span class="n">t</span><span class="p">,</span><span class="n">chooser</span><span class="o">=</span><span class="n">sample_type</span><span class="p">)</span>
+        <span class="k">yield</span> <span class="n">clip</span></div>
+
+
+<span class="c1"># reads audio from any number of audio files sitting in directory &#39;path&#39;</span>
+<span class="c1"># supplies a random window or chunk of lenth</span>
+<div class="viewcode-block" id="readaudio_generator"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.readaudio_generator">[docs]</a><span class="k">def</span> <span class="nf">readaudio_generator</span><span class="p">(</span><span class="n">seq_size</span><span class="o">=</span><span class="mi">8192</span><span class="o">*</span><span class="mi">2</span><span class="p">,</span>  <span class="n">path</span><span class="o">=</span><span class="s1">&#39;Train&#39;</span><span class="p">,</span>
+    <span class="n">basepath</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="s1">&#39;~&#39;</span><span class="p">)</span><span class="o">+</span><span class="s1">&#39;/datasets/signaltrain&#39;</span><span class="p">,</span>
+    <span class="n">random_every</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+    <span class="c1"># seq_size = amount of audio samples to supply from file</span>
+    <span class="c1"># basepath = directory containing Train, Val, and Test directories</span>
+    <span class="c1"># path = audio files for dataset  (can be Train, Val or test)</span>
+    <span class="c1"># random_every = get a random window every time next is called, or step sequentially through file</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">basepath</span><span class="o">+</span><span class="s1">&#39;/&#39;</span><span class="o">+</span><span class="n">path</span><span class="o">+</span><span class="s1">&#39;/&#39;</span>
+    <span class="n">files</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">listdir</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">sr</span> <span class="o">=</span> <span class="mi">44100</span>
+    <span class="n">read_new_file</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="n">start</span> <span class="o">=</span> <span class="o">-</span><span class="n">seq_size</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">read_new_file</span><span class="p">:</span>
+            <span class="n">filename</span> <span class="o">=</span> <span class="n">path</span><span class="o">+</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">(</span><span class="n">files</span><span class="p">)</span>  <span class="c1"># pick a random audio file in the directory</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Reading new data from &quot;</span><span class="o">+</span><span class="n">filename</span><span class="o">+</span><span class="s2">&quot; &quot;</span><span class="p">)</span>
+            <span class="n">data</span><span class="p">,</span> <span class="n">sr</span> <span class="o">=</span> <span class="n">read_audio_file</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">sr</span><span class="o">=</span><span class="n">sr</span><span class="p">)</span>
+            <span class="n">read_new_file</span><span class="o">=</span><span class="kc">False</span>   <span class="c1"># don&#39;t keep switching files  everytime generator is called</span>
+
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">random_every</span><span class="p">):</span> <span class="c1"># grab a random window of the signal</span>
+            <span class="n">start</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">-</span><span class="n">seq_size</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">start</span> <span class="o">+=</span> <span class="n">seq_size</span>
+        <span class="n">xraw</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="n">start</span><span class="p">:</span><span class="n">start</span><span class="o">+</span><span class="n">seq_size</span><span class="p">]</span>   <span class="c1"># the newaxis just gives us a [1,] on front</span>
+        <span class="c1"># Note: any &#39;windowing&#39; happens after the effects are applied, later</span>
+        <span class="n">rc</span> <span class="o">=</span> <span class="p">(</span> <span class="k">yield</span> <span class="n">xraw</span> <span class="p">)</span>         <span class="c1"># rc is set by generator&#39;s send() method.</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">rc</span><span class="p">,</span> <span class="nb">bool</span><span class="p">):</span>    <span class="c1"># can set read_new by calling send(True)</span>
+            <span class="n">read_new_file</span> <span class="o">=</span> <span class="n">rc</span></div>
+
+
+
+
+<div class="viewcode-block" id="samplecat_ta"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.samplecat_ta">[docs]</a><span class="k">def</span> <span class="nf">samplecat_ta</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="s1">&#39;~&#39;</span><span class="p">)</span><span class="o">+</span><span class="s1">&#39;/SampleCat/DrumSamples_large/&#39;</span><span class="p">,</span>
+    <span class="n">sr</span><span class="o">=</span><span class="mi">44100</span><span class="p">,</span> <span class="n">bpm</span><span class="o">=</span><span class="mi">90</span><span class="p">,</span> <span class="n">seq_size</span><span class="o">=</span><span class="mi">24900</span><span class="o">*</span><span class="mi">1000</span><span class="p">,</span> <span class="n">shuffle</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">max_shift</span><span class="o">=</span><span class="mi">7500</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Concatenates audio clips/samples (e.g. drums), generates time-aligned and</span>
+<span class="sd">    and randomly-shifted variants, as well as a click track</span>
+
+<span class="sd">    Inputs:</span>
+<span class="sd">        path:     Directory where .WAV sample files are located</span>
+<span class="sd">        sr:       Sample rate in Hz</span>
+<span class="sd">        bpm:      Beats per minute for time-alignment and click generation</span>
+<span class="sd">        seq_size: Length in samples of generated audio signal</span>
+<span class="sd">        shuffle:  Whether or not to randomly permute the order of sample files</span>
+
+<span class="sd">    Outputs:</span>
+<span class="sd">        final_clip_randomized: Audio sequence of many samples, randomly shifted</span>
+<span class="sd">        final_clip:            Audio sequence of same samples, &#39;on the grid&#39;</span>
+<span class="sd">        click:                 Audio click track corresponding to the &#39;grid&#39;</span>
+
+<span class="sd">    Author: B.L. Colburn, benjamin.colburn@pop.belmont.edu</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Initializing samplecat_ta:&quot;</span><span class="p">,</span><span class="n">end</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">click_delay</span> <span class="o">=</span> <span class="mi">60</span><span class="o">/</span><span class="n">bpm</span>    <span class="c1"># in seconds</span>
+    <span class="n">sample_delay</span> <span class="o">=</span> <span class="n">librosa</span><span class="o">.</span><span class="n">core</span><span class="o">.</span><span class="n">time_to_samples</span><span class="p">(</span><span class="n">click_delay</span><span class="p">,</span> <span class="n">sr</span><span class="o">=</span><span class="n">sr</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">files</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">listdir</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="k">except</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Error! Can&#39;t find audio samples in&quot;</span><span class="p">,</span><span class="n">path</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+
+    <span class="n">final_clip</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">seq_size</span><span class="p">,),</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+    <span class="n">final_clip_randomized</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">seq_size</span><span class="o">+</span><span class="n">sample_delay</span><span class="p">,),</span><span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+    <span class="n">paths</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">files</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;.WAV&quot;</span><span class="p">):</span>
+            <span class="n">paths</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">path</span> <span class="o">+</span> <span class="s2">&quot;/&quot;</span> <span class="o">+</span><span class="n">f</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span><span class="nb">len</span><span class="p">(</span><span class="n">paths</span><span class="p">),</span><span class="s2">&quot;audio clips available in&quot;</span><span class="p">,</span><span class="n">path</span><span class="p">)</span>
+
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>   <span class="c1"># can use this as a generator, call inf. many times</span>
+        <span class="k">if</span> <span class="n">shuffle</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;samplecat_ta: shuffling order of clips...&quot;</span><span class="p">)</span>
+            <span class="n">random</span><span class="o">.</span><span class="n">shuffle</span><span class="p">(</span><span class="n">paths</span><span class="p">)</span>
+            <span class="n">shuffle</span> <span class="o">=</span> <span class="kc">False</span>    <span class="c1"># turn it off so it only shuffles when asked to</span>
+
+        <span class="c1"># fill up final_clip &amp; final_clip_randomized with audio clips/samples</span>
+        <span class="n">i</span><span class="p">,</span> <span class="n">current_size</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span>
+        <span class="k">while</span> <span class="n">current_size</span><span class="o">&lt;</span><span class="n">final_clip</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">and</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">paths</span><span class="p">):</span>
+            <span class="n">r_shift</span> <span class="o">=</span>  <span class="nb">int</span><span class="p">((</span><span class="mi">2</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">rand</span><span class="p">()</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">max_shift</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">i</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">r_shift</span> <span class="o">=</span>  <span class="nb">abs</span><span class="p">(</span><span class="n">r_shift</span><span class="p">)</span>  <span class="c1"># first clip needs to be never early, only late</span>
+            <span class="n">start</span>   <span class="o">=</span> <span class="n">i</span> <span class="o">*</span> <span class="n">sample_delay</span>
+            <span class="n">start_s</span> <span class="o">=</span> <span class="n">i</span> <span class="o">*</span> <span class="n">sample_delay</span> <span class="o">+</span> <span class="n">r_shift</span>
+            <span class="n">end</span>   <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">start</span> <span class="o">+</span> <span class="n">sample_delay</span><span class="p">,</span>  <span class="n">final_clip</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+            <span class="n">end_s</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">start_s</span> <span class="o">+</span> <span class="n">sample_delay</span><span class="p">,</span>  <span class="n">final_clip</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+            <span class="n">clip</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">librosa</span><span class="o">.</span><span class="n">core</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">paths</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">mono</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">sr</span><span class="o">=</span><span class="n">sr</span><span class="p">,</span> <span class="n">duration</span><span class="o">=</span><span class="mf">4.0</span><span class="p">)</span>  <span class="c1"># &quot;, _&quot; means we throw out the sr returned by load</span>
+            <span class="n">clip</span> <span class="o">=</span> <span class="n">librosa</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">fix_length</span><span class="p">(</span><span class="n">clip</span><span class="p">,</span> <span class="n">sample_delay</span><span class="p">)</span>
+            <span class="n">final_clip</span><span class="p">[</span><span class="n">start</span><span class="p">:</span><span class="n">end</span><span class="p">]</span> <span class="o">=</span> <span class="n">clip</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="n">end</span><span class="o">-</span><span class="n">start</span><span class="p">]</span>
+            <span class="n">final_clip_randomized</span><span class="p">[</span><span class="n">start_s</span><span class="p">:</span><span class="n">end_s</span><span class="p">]</span> <span class="o">=</span> <span class="n">clip</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="n">end_s</span><span class="o">-</span><span class="n">start_s</span><span class="p">]</span>
+            <span class="n">i</span><span class="o">=</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span>
+            <span class="n">current_size</span> <span class="o">=</span> <span class="n">current_size</span> <span class="o">+</span> <span class="n">clip</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="c1"># produce the click track</span>
+        <span class="n">duration</span> <span class="o">=</span> <span class="n">librosa</span><span class="o">.</span><span class="n">core</span><span class="o">.</span><span class="n">get_duration</span><span class="p">(</span><span class="n">final_clip</span><span class="p">,</span> <span class="n">sr</span><span class="o">=</span><span class="n">sr</span><span class="p">)</span>
+        <span class="n">num_clicks</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span> <span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">duration</span> <span class="o">/</span> <span class="n">click_delay</span><span class="p">)</span> <span class="p">)</span>   <span class="c1"># ceil rounds up</span>
+        <span class="n">times</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">num_clicks</span><span class="p">)</span> <span class="o">*</span> <span class="n">click_delay</span>
+        <span class="n">click</span> <span class="o">=</span> <span class="n">librosa</span><span class="o">.</span><span class="n">core</span><span class="o">.</span><span class="n">clicks</span><span class="p">(</span><span class="n">times</span><span class="o">=</span><span class="n">times</span><span class="p">,</span> <span class="n">sr</span><span class="o">=</span><span class="n">sr</span><span class="p">,</span> <span class="n">click_duration</span><span class="o">=</span><span class="n">click_delay</span><span class="p">,</span> <span class="n">click_freq</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span> <span class="n">length</span><span class="o">=</span><span class="n">final_clip</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+
+        <span class="c1">#? SHH: why is this here?</span>
+        <span class="c1">#final_clip = np.trim_zeros(final_clip,&#39;b&#39;)</span>
+        <span class="c1">#final_clip_randomized = np.trim_zeros(final_clip_randomized,&#39;b&#39;)</span>
+
+        <span class="c1"># How about instead of that: make the three audio arrays the same length</span>
+        <span class="n">min_length</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span> <span class="nb">min</span><span class="p">(</span> <span class="n">final_clip</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">final_clip_randomized</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="n">click</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+
+        <span class="c1"># return values from the generator; shuffle can be (re)set set via send() method</span>
+        <span class="n">shuffle</span> <span class="o">=</span> <span class="p">(</span> <span class="k">yield</span> <span class="n">final_clip_randomized</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="n">min_length</span><span class="p">],</span> <span class="n">final_clip</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="n">min_length</span><span class="p">],</span> <span class="n">click</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="n">min_length</span><span class="p">]</span> <span class="p">)</span>
+
+        <span class="n">final_clip</span> <span class="o">*=</span> <span class="mi">0</span>   <span class="c1"># when generator is called again, start here &amp; clear variables</span>
+        <span class="n">final_clip_randomized</span> <span class="o">*=</span> <span class="mi">0</span></div>
+
+
+
+
+<div class="viewcode-block" id="gen_audio"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.gen_audio">[docs]</a><span class="k">def</span> <span class="nf">gen_audio</span><span class="p">(</span><span class="n">seq_size</span><span class="o">=</span><span class="mi">8192</span><span class="o">*</span><span class="mi">2</span><span class="p">,</span> <span class="n">chunk_size</span><span class="o">=</span><span class="mi">8192</span><span class="p">,</span>  <span class="n">path</span><span class="o">=</span><span class="s1">&#39;Train&#39;</span><span class="p">,</span>
+    <span class="n">basepath</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="s1">&#39;~&#39;</span><span class="p">)</span><span class="o">+</span><span class="s1">&#39;/datasets/signaltrain&#39;</span><span class="p">,</span>
+    <span class="n">random_every</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">effect</span><span class="o">=</span><span class="s1">&#39;ta&#39;</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    General wrapper for audio generators, that sets up windowed &#39;stacks&#39;</span>
+<span class="sd">    and converts to pytorch tensors</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">if</span> <span class="n">effect</span> <span class="o">!=</span> <span class="s1">&#39;ta&#39;</span><span class="p">:</span>
+        <span class="c1">#signal_gen = readaudio_generator(seq_size, chunk_size, path, basepath, random_every)</span>
+        <span class="n">signal_gen</span> <span class="o">=</span> <span class="n">synthaudio_generator</span><span class="p">(</span><span class="n">seq_size</span><span class="o">=</span><span class="n">seq_size</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">signal_gen</span> <span class="o">=</span> <span class="n">samplecat_ta</span><span class="p">(</span><span class="n">seq_size</span><span class="o">=</span><span class="n">seq_size</span><span class="p">,</span> <span class="n">bpm</span><span class="o">=</span><span class="mi">120</span><span class="p">,</span> <span class="n">max_shift</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">chunk_size</span><span class="o">/</span><span class="mi">3</span><span class="p">))</span>
+    <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">effect</span> <span class="o">!=</span> <span class="s1">&#39;ta&#39;</span><span class="p">:</span>
+            <span class="n">X</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">signal_gen</span><span class="p">)</span>
+            <span class="n">Y</span> <span class="o">=</span> <span class="n">functions</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">f</span><span class="o">=</span><span class="n">effect</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">X</span><span class="p">,</span> <span class="n">Y</span><span class="p">,</span> <span class="n">click</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">signal_gen</span><span class="p">)</span>
+        <span class="n">X</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">from_numpy</span><span class="p">(</span><span class="n">st_utils</span><span class="o">.</span><span class="n">chopnstack</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">chunk_size</span><span class="p">))</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">Y</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">from_numpy</span><span class="p">(</span><span class="n">st_utils</span><span class="o">.</span><span class="n">chopnstack</span><span class="p">(</span><span class="n">Y</span><span class="p">,</span> <span class="n">chunk_size</span><span class="p">))</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">X</span><span class="o">.</span><span class="n">requires_grad</span><span class="p">,</span> <span class="n">Y</span><span class="o">.</span><span class="n">requires_grad</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="kc">False</span>
+        <span class="n">rc</span> <span class="o">=</span> <span class="p">(</span><span class="k">yield</span> <span class="n">X</span><span class="p">,</span> <span class="n">Y</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">rc</span><span class="p">,</span> <span class="nb">bool</span><span class="p">):</span>    <span class="c1"># our send method can pass data through</span>
+            <span class="n">signal_gen</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">rc</span><span class="p">)</span></div>
+
+
+
+<span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">def gen_synth_audio(sig_length, batch_size, device, chunk_size=8192, effect=&#39;ta&#39;, input_var=None, \</span>
+<span class="sd">    target_var=None, mu_law=False, x_grad=True, fs=44100):</span>
+<span class="sd">    dtype=np.float32</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+<span class="sd">    ---------------------------------------------------------------------------------------</span>
+<span class="sd">       gen__synth_audio is a routine that provides synthetic audio data.</span>
+<span class="sd">       TODO: should probably try adding mu-law companding to see if that helps with SNR</span>
+<span class="sd">       Inputs:</span>
+<span class="sd">             sig_length:  is actually the totally length (in samples) of the the entire dataset,</span>
+<span class="sd">                         conceived as if it were just one file.</span>
+<span class="sd">             device:     the pytorch device where the computation is performed</span>
+<span class="sd">             chunk_size: chop up the signal into chunks of this length.</span>
+<span class="sd">             effect:     string corresponding to a name of an audio effect</span>
+<span class="sd">                         Some of these just generate generic input &amp; apply the effect to that,</span>
+<span class="sd">                         other &#39;effects&#39; may involve generating input &amp; output together</span>
+<span class="sd">            input_var &amp; target_var: These *can* be passed in so that memory gets freed up</span>
+<span class="sd">                                    before generating new data. (It&#39;d be nice to be able to</span>
+<span class="sd">                                    do everything &#39;in place&#39;, but w/ PyTorch vs. numpy, and</span>
+<span class="sd">                                    GPU vs CPU, this can get complicated.)</span>
+<span class="sd">            mu_law:      Set to true to apply mu-law encoding to input &amp; target audio</span>
+<span class="sd">            x_grad:      Normally the signal_var generated gets a gradient, but by setting this</span>
+<span class="sd">                         to False you can save memory</span>
+<span class="sd">            fs:          sample rate</span>
+<span class="sd">    ---------------------------------------------------------------------------------------</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+<span class="sd">    # Free up pytorch tensor memory usage before generating new data</span>
+<span class="sd">    if (input_var is not None) and (target_var is not None):</span>
+<span class="sd">        del input_var, target_var</span>
+
+<span class="sd">    overlap = 0 #int(chunk_size*0.1)    # this by how many elements the chunks (windows) will overlap</span>
+<span class="sd">    unique_per_chunk = chunk_size - 2*overlap</span>
+
+<span class="sd">    num_chunks = int(np.ceil(sig_length / unique_per_chunk))</span>
+
+<span class="sd">    sig_length = num_chunks * chunk_size   # if requested size isn&#39;t integer multiple of chunk_size, we zero-pad</span>
+
+<span class="sd">    input_sig = np.zeros( (batch_size, sig_length) ).astype(dtype)       # allocate storage</span>
+<span class="sd">    target_sig = np.zeros( (batch_size, sig_length) ).astype(dtype)       # allocate storage</span>
+
+<span class="sd">    for bi in range(batch_size):  #  &quot;bi&quot; = &quot;batch index&quot;</span>
+<span class="sd">        # define new</span>
+<span class="sd">        if False and (&#39;ps&#39; == effect):    # pitch shift  TODO: this is broken for now</span>
+<span class="sd">            fs = 44100.</span>
+<span class="sd">            num_waves = 20</span>
+<span class="sd">            amp_fac = 0.43</span>
+<span class="sd">            freq_fac = 0.31</span>
+<span class="sd">            input_stack, target_stack = gen_pitch_shifted_pairs(chunk_size, fs, amp_fac, freq_fac, num_waves, num_chunks)</span>
+<span class="sd">        else:      # other effects, where target can be generated from input instead of both together</span>
+<span class="sd">            # Generate input signal via a series of samaple &#39;clips&#39;</span>
+<span class="sd">            clip_size = 22050      # about     0.5 seconds</span>
+<span class="sd">            num_sample_clips = int(sig_length / clip_size)</span>
+<span class="sd">            t = np.linspace(0,1,num=clip_size).astype(dtype)</span>
+<span class="sd">            sample_type = 2 # &#39;pluck&#39;</span>
+<span class="sd">            for i in range(num_sample_clips):        #  go through each section of input and assign a waveform</span>
+<span class="sd">                clip = gen_input_sample(t,chooser=sample_type)            # the audio clip to add</span>
+
+<span class="sd">                start_ind = i * clip_size                                 # &#39;on the grid&#39;</span>
+<span class="sd">                end_ind = min( start_ind + clip_size, sig_length )        # just don&#39;t go off the end of the buffer</span>
+<span class="sd">                this_clip_len = end_ind - start_ind       # length of this clip</span>
+<span class="sd">                target_sig[bi, start_ind:start_ind+this_clip_len] = clip[0:this_clip_len]  # this will get overwritten if we&#39;re not doing time alignment</span>
+
+<span class="sd">                r_shift = int(0.3*clip_size* (2*np.random.rand()-1))          # random_shift, early or late</span>
+<span class="sd">                start_ind = start_ind + r_shift                               # &#39;on the grid&#39;</span>
+<span class="sd">                if start_ind &lt; 0:</span>
+<span class="sd">                    clip_start_ind = -start_ind</span>
+<span class="sd">                    clip_end_ind = start_ind + clip_size</span>
+<span class="sd">                    input_sig[bi, 0:clip_end_ind] = clip[0:clip_end_ind]  #     input is like target but shifted off the grid</span>
+<span class="sd">                else:</span>
+<span class="sd">                    end_ind = min( start_ind + clip_size, sig_length )        # just don&#39;t go off the end of the buffer</span>
+<span class="sd">                    this_clip_len = end_ind - start_ind       # length of this clip</span>
+<span class="sd">                    input_sig[bi, start_ind:start_ind+this_clip_len] = clip[0:this_clip_len]  # input is like target but shifted off the grid</span>
+
+
+<span class="sd">            if (&#39;delay&#39; == effect):</span>
+<span class="sd">                input_sig *= 0.5    # for delay, just make it even smaller to avoid any clipping that may occur</span>
+
+<span class="sd">            # Apply the effect, whatever it is except time alignment</span>
+<span class="sd">            if (&#39;ta&#39; != effect):</span>
+<span class="sd">                target_sig[bi] = functions(input_sig[bi], f=effect)</span>
+
+<span class="sd">            if mu_law:</span>
+<span class="sd">                input_sig = encode_mu_law(input_sig)</span>
+<span class="sd">                target_sig = encode_mu_law(target_sig)</span>
+<span class="sd">                dtype = np.long</span>
+
+<span class="sd">    # chop up the input &amp; target signal(s)</span>
+<span class="sd">    #input_sig.shape = (batch_size, num_chunks, chunk_size)</span>
+<span class="sd">    #target_sig.shape = (batch_size, num_chunks, chunk_size)</span>
+
+
+<span class="sd">    input_stack =  chopnstack(input_sig, chunk_size=chunk_size, overlap=overlap)</span>
+<span class="sd">    target_stack = chopnstack(target_sig, chunk_size=chunk_size, overlap=overlap)</span>
+
+<span class="sd">    input_var = Variable(torch.from_numpy(input_stack), requires_grad=x_grad).to(device)</span>
+<span class="sd">    target_var = Variable(torch.from_numpy(target_stack), requires_grad=False).to(device)</span>
+
+<span class="sd">    return input_var, target_var</span>
+<span class="sd">&#39;&#39;&#39;</span>
+
+
+
+
+<span class="c1"># mu laws from https://gist.github.com/lirnli/4282fcdfb383bb160cacf41d8c783c70</span>
+<div class="viewcode-block" id="encode_mu_law"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.encode_mu_law">[docs]</a><span class="k">def</span> <span class="nf">encode_mu_law</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">mu</span><span class="o">=</span><span class="mi">256</span><span class="p">):</span>
+    <span class="n">mu</span> <span class="o">=</span> <span class="n">mu</span><span class="o">-</span><span class="mi">1</span>
+    <span class="n">fx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sign</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="mi">1</span><span class="o">+</span><span class="n">mu</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">x</span><span class="p">))</span><span class="o">/</span><span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="mi">1</span><span class="o">+</span><span class="n">mu</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">floor</span><span class="p">((</span><span class="n">fx</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="o">/</span><span class="mi">2</span><span class="o">*</span><span class="n">mu</span><span class="o">+</span><span class="mf">0.5</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">long</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="decode_mu_law"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.audio.decode_mu_law">[docs]</a><span class="k">def</span> <span class="nf">decode_mu_law</span><span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">mu</span><span class="o">=</span><span class="mi">256</span><span class="p">):</span>
+    <span class="n">mu</span> <span class="o">=</span> <span class="n">mu</span><span class="o">-</span><span class="mi">1</span>
+    <span class="n">fx</span> <span class="o">=</span> <span class="p">(</span><span class="n">y</span><span class="o">-</span><span class="mf">0.5</span><span class="p">)</span><span class="o">/</span><span class="n">mu</span><span class="o">*</span><span class="mi">2</span><span class="o">-</span><span class="mi">1</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sign</span><span class="p">(</span><span class="n">fx</span><span class="p">)</span><span class="o">/</span><span class="n">mu</span><span class="o">*</span><span class="p">((</span><span class="mi">1</span><span class="o">+</span><span class="n">mu</span><span class="p">)</span><span class="o">**</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">fx</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">x</span></div>
+
+
+
+
+<span class="c1"># EOF</span>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper"><div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../index.html">Documentation overview</a><ul>
+  <li><a href="../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2018, Scott H. Hawley.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 1.7.5</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.11</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>
