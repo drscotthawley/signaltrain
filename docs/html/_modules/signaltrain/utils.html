@@ -1,0 +1,496 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>signaltrain.utils &#8212; signaltrain 0.0.1 documentation</title>
+    <link rel="stylesheet" href="../../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../../_static/jquery.js"></script>
+    <script type="text/javascript" src="../../_static/underscore.js"></script>
+    <script type="text/javascript" src="../../_static/doctools.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for signaltrain.utils</h1><div class="highlight"><pre>
+<span></span>
+<span class="n">__author__</span> <span class="o">=</span> <span class="s1">&#39;S.H. Hawley&#39;</span>
+<span class="n">__version__</span> <span class="o">=</span> <span class="s1">&#39;0.0.1&#39;</span>
+
+<span class="c1"># imports</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">matplotlib</span>
+<span class="n">matplotlib</span><span class="o">.</span><span class="n">use</span><span class="p">(</span><span class="s1">&#39;Agg&#39;</span><span class="p">)</span>
+<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
+<span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">shutil</span>
+<span class="kn">from</span> <span class="nn">.</span> <span class="k">import</span> <span class="n">audio</span> <span class="k">as</span> <span class="n">st_audio</span>
+<span class="kn">import</span> <span class="nn">datetime</span>  <span class="c1"># just to name the log files</span>
+
+
+<div class="viewcode-block" id="progbar"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.progbar">[docs]</a><span class="k">def</span> <span class="nf">progbar</span><span class="p">(</span><span class="n">epoch</span><span class="p">,</span> <span class="n">max_epochs</span><span class="p">,</span> <span class="n">batch_index</span><span class="p">,</span> <span class="n">nbatches</span><span class="p">,</span> <span class="n">loss</span><span class="p">,</span> <span class="n">reg_term</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">width</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span> <span class="n">vloss</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Simple progress bar for batch training.</span>
+
+<span class="sd">    You can get a better ProgBar if you install something. ;-)</span>
+<span class="sd">    Ripped off the style of Keras</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">base_str</span> <span class="o">=</span> <span class="s1">&#39;</span><span class="se">\r</span><span class="s1">Epoch &#39;</span><span class="o">+</span><span class="nb">str</span><span class="p">(</span><span class="n">epoch</span><span class="p">)</span><span class="o">+</span><span class="s1">&#39; /&#39;</span><span class="o">+</span><span class="nb">str</span><span class="p">(</span><span class="n">max_epochs</span><span class="p">)</span><span class="o">+</span><span class="s1">&#39;: &#39;</span>
+    <span class="n">percent</span> <span class="o">=</span> <span class="p">(</span><span class="n">batch_index</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="o">/</span><span class="n">nbatches</span>
+    <span class="n">barlength</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">width</span> <span class="o">*</span> <span class="n">percent</span><span class="p">)</span>
+    <span class="n">bar</span>  <span class="o">=</span> <span class="s1">&#39;=&#39;</span><span class="o">*</span><span class="n">barlength</span> <span class="o">+</span> <span class="s1">&#39;&gt;&#39;</span>
+    <span class="n">leftover</span> <span class="o">=</span> <span class="n">width</span> <span class="o">-</span> <span class="n">barlength</span>
+    <span class="n">space</span> <span class="o">=</span>  <span class="s1">&#39; &#39;</span><span class="o">*</span><span class="n">leftover</span>
+    <span class="n">loss_num</span> <span class="o">=</span> <span class="n">loss</span><span class="c1">#</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">base_str</span> <span class="o">+</span> <span class="n">bar</span> <span class="o">+</span> <span class="n">space</span><span class="o">+</span><span class="s1">&#39; loss: </span><span class="si">{:10.5e}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">loss_num</span><span class="p">),</span> <span class="n">end</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="k">return</span></div>
+
+
+<div class="viewcode-block" id="LossLogger"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.LossLogger">[docs]</a><span class="k">class</span> <span class="nc">LossLogger</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;Class for keeping track of and printing loss info&quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s1">&#39;run&#39;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        name is the tag for the run. it will be appended with the current</span>
+<span class="sd">        time &amp; date.  a directory with this full name will be created, and</span>
+<span class="sd">        logs will go there</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">history</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;Epoch&#39;</span><span class="p">:[],</span> <span class="s1">&#39;Train&#39;</span><span class="p">:[],</span> <span class="s1">&#39;Val&#39;</span><span class="p">:[]}</span><span class="c1">#, &#39;Reg&#39;:[]}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">best_vloss</span> <span class="o">=</span> <span class="mf">999.9</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">name</span> <span class="o">+</span> <span class="s1">&#39;_{date:%H:%M:%S_%b_</span><span class="si">%d</span><span class="s1">_%Y}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span> <span class="n">date</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span> <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">lossfile</span> <span class="o">=</span> <span class="s2">&quot;losses.csv&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">setup_files</span><span class="p">()</span>
+
+<div class="viewcode-block" id="LossLogger.setup_files"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.LossLogger.setup_files">[docs]</a>    <span class="k">def</span> <span class="nf">setup_files</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;opens loss-tracking directory for writing&quot;&quot;&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;LossLogger: logging to directory &quot;&#39;</span><span class="o">+</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="o">+</span><span class="s1">&#39;&quot;&#39;</span><span class="p">)</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>   <span class="c1"># TODO: noclobber. Starting multiple simultaneous runs in the same directory</span>
+                              <span class="c1"># with the same tag (unlikely) will fail here</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="o">+</span><span class="s1">&#39;/&#39;</span><span class="o">+</span><span class="bp">self</span><span class="o">.</span><span class="n">lossfile</span><span class="p">,</span> <span class="s2">&quot;w&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">myfile</span><span class="p">:</span>
+            <span class="n">myfile</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s1">&#39;#Epoch, TrainLoss, ValTotalLoss, ValMSELoss, ValL1Loss</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="LossLogger.update_file"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.LossLogger.update_file">[docs]</a>    <span class="k">def</span> <span class="nf">update_file</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;append loss info to (CSV) file&quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="o">+</span><span class="s1">&#39;/&#39;</span><span class="o">+</span><span class="bp">self</span><span class="o">.</span><span class="n">lossfile</span><span class="p">,</span> <span class="s2">&quot;a+&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">myfile</span><span class="p">:</span>
+            <span class="n">outstr</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">history</span><span class="p">[</span><span class="s1">&#39;Epoch&#39;</span><span class="p">][</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span><span class="o">+</span><span class="s1">&#39;, </span><span class="si">{:10.5e}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">history</span><span class="p">[</span><span class="s1">&#39;Train&#39;</span><span class="p">][</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span><span class="o">+</span> \
+                <span class="s1">&#39;, </span><span class="si">{:10.5e}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">history</span><span class="p">[</span><span class="s1">&#39;Val&#39;</span><span class="p">][</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+            <span class="n">myfile</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">outstr</span><span class="o">+</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="LossLogger.update"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.LossLogger.update">[docs]</a>    <span class="k">def</span> <span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">epoch</span><span class="p">,</span> <span class="n">loss</span><span class="p">,</span> <span class="n">vloss</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;the main interface; stores losses in history dict, updates file&quot;&quot;&quot;</span>
+        <span class="n">tloss</span><span class="p">,</span> <span class="n">vloss</span> <span class="o">=</span> <span class="n">loss</span><span class="p">,</span> <span class="n">vloss</span> <span class="c1"># loss.item(), vloss.item()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">history</span><span class="p">[</span><span class="s1">&#39;Epoch&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">epoch</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">history</span><span class="p">[</span><span class="s1">&#39;Train&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">tloss</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">history</span><span class="p">[</span><span class="s1">&#39;Val&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">vloss</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;  val_loss: </span><span class="si">{:10.5e}</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">history</span><span class="p">[</span><span class="s1">&#39;Val&#39;</span><span class="p">][</span><span class="o">-</span><span class="mi">1</span><span class="p">]))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">update_file</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="LossLogger.is_best"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.LossLogger.is_best">[docs]</a>    <span class="k">def</span> <span class="nf">is_best</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;only updates best_vloss when called; this is intentional&quot;&quot;&quot;</span>
+        <span class="n">vloss_num</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">history</span><span class="p">[</span><span class="s1">&#39;Val&#39;</span><span class="p">][</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>  <span class="c1"># most recent val loss</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">vloss_num</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">best_vloss</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">best_vloss</span> <span class="o">=</span> <span class="n">vloss_num</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="k">return</span> <span class="kc">False</span></div></div>
+
+
+
+<div class="viewcode-block" id="save_checkpoint"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.save_checkpoint">[docs]</a><span class="k">def</span> <span class="nf">save_checkpoint</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">filename</span><span class="o">=</span><span class="s1">&#39;checkpoint.pth.tar&#39;</span><span class="p">,</span> <span class="n">best_only</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">is_best</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Saves the &#39;state&#39; of model and optimization to a file</span>
+
+<span class="sd">     state can include multiple elements in dict format, e.g.</span>
+<span class="sd">        state = {&#39;epoch&#39;: epoch + 1, &#39;state_dict&#39;: model.state_dict(),&#39;optimizer&#39;: optimizer.state_dict(),}</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">is_best</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Best val_loss so far (for checkpoint).    &quot;</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="ow">not</span> <span class="n">best_only</span><span class="p">)</span> <span class="ow">or</span> <span class="n">is_best</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Saving checkpoint in&quot;</span><span class="p">,</span><span class="n">filename</span><span class="p">)</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">filename</span><span class="p">)</span>
+    <span class="k">return</span></div>
+
+
+<div class="viewcode-block" id="load_checkpoint"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.load_checkpoint">[docs]</a><span class="k">def</span> <span class="nf">load_checkpoint</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span> <span class="n">losslogger</span><span class="p">,</span> <span class="n">filename</span><span class="o">=</span><span class="s1">&#39;checkpoint.pth.tar&#39;</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Loads from a checkpoint file and initializes model weights, optimizer params</span>
+<span class="sd">         &amp; lossloger parts</span>
+
+<span class="sd">    Note: Input model &amp; optimizer should be pre-defined.</span>
+<span class="sd">    This routine only updates their states.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">start_epoch</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">filename</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&gt; loading checkpoint &#39;</span><span class="si">{}</span><span class="s2">&#39;&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">filename</span><span class="p">))</span>
+        <span class="n">checkpoint</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+        <span class="n">start_epoch</span> <span class="o">=</span> <span class="n">checkpoint</span><span class="p">[</span><span class="s1">&#39;epoch&#39;</span><span class="p">]</span>
+        <span class="c1">#best_prec1 = checkpoint[&#39;best_prec1&#39;]</span>
+        <span class="n">model</span><span class="o">.</span><span class="n">load_state_dict</span><span class="p">(</span><span class="n">checkpoint</span><span class="p">[</span><span class="s1">&#39;state_dict&#39;</span><span class="p">])</span>
+        <span class="n">optimizer</span><span class="o">.</span><span class="n">load_state_dict</span><span class="p">(</span><span class="n">checkpoint</span><span class="p">[</span><span class="s1">&#39;optimizer&#39;</span><span class="p">])</span>
+        <span class="n">savename</span> <span class="o">=</span> <span class="n">losslogger</span><span class="o">.</span><span class="n">name</span>                <span class="c1"># keep from overwriting current run name</span>
+        <span class="n">losslogger</span> <span class="o">=</span> <span class="n">checkpoint</span><span class="p">[</span><span class="s1">&#39;losslogger&#39;</span><span class="p">]</span>
+        <span class="n">losslogger</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">savename</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&gt; loaded checkpoint &#39;</span><span class="si">{}</span><span class="s2">&#39; (epoch </span><span class="si">{}</span><span class="s2">)&quot;</span>
+                  <span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="n">checkpoint</span><span class="p">[</span><span class="s1">&#39;epoch&#39;</span><span class="p">]))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&gt; no checkpoint found at &#39;</span><span class="si">{}</span><span class="s2">&#39;&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">filename</span><span class="p">))</span>
+
+    <span class="k">return</span> <span class="n">model</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span> <span class="n">start_epoch</span><span class="p">,</span> <span class="n">losslogger</span></div>
+
+
+<div class="viewcode-block" id="load_weights"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.load_weights">[docs]</a><span class="k">def</span> <span class="nf">load_weights</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">filename</span><span class="o">=</span><span class="s1">&#39;checkpoint.pth.tar&#39;</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    simpler than load_checkpoint(); this ignores everything but the model</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="n">filename</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&gt; Initializing model weights from checkpoint &#39;</span><span class="si">{}</span><span class="s2">&#39;&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">filename</span><span class="p">))</span>
+        <span class="n">checkpoint</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+        <span class="n">model</span><span class="o">.</span><span class="n">load_state_dict</span><span class="p">(</span><span class="n">checkpoint</span><span class="p">[</span><span class="s1">&#39;state_dict&#39;</span><span class="p">])</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&gt; no checkpoint found at &#39;</span><span class="si">{}</span><span class="s2">&#39;&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">filename</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">model</span></div>
+
+
+
+
+<div class="viewcode-block" id="overlapping_windows"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.overlapping_windows">[docs]</a><span class="k">def</span> <span class="nf">overlapping_windows</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">window_size</span><span class="p">,</span> <span class="n">overlap</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create an overlapped version of X</span>
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    X : ndarray, shape=(n_samples,)</span>
+<span class="sd">        Input signal to window and overlap</span>
+<span class="sd">    window_size : int</span>
+<span class="sd">        Size of windows to take</span>
+<span class="sd">    overlap : int</span>
+<span class="sd">        Number of elements to overlap by on each side (zero pads on ends)</span>
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    X_windows : shape=(n_windows, window_size)</span>
+<span class="sd">        2D array of overlapped X</span>
+
+<span class="sd">    So, for each window, the amount of &#39;unique&#39; data will be (window_size - 2*overlap)</span>
+
+<span class="sd">    Example:</span>
+<span class="sd">    X = np.arange(15)</span>
+<span class="sd">    X =  [ 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14]  (15 elements)</span>
+<span class="sd">    overlapping_windows(X, 5, 2)</span>
+<span class="sd">    X_padded = [ 0 0 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 0 0] (17 elements)</span>
+<span class="sd">    X_windows = [[0 0 0 1 2]</span>
+<span class="sd">                 [0 0 1 2 3]</span>
+<span class="sd">                 [0 1 2 3 4]</span>
+<span class="sd">                 [... 3 ...]</span>
+<span class="sd">                 [    4    ]</span>
+<span class="sd">                 [    5    ]</span>
+<span class="sd">                 [    6    ]</span>
+<span class="sd">                 [    7    ]</span>
+<span class="sd">                 [    8    ]</span>
+<span class="sd">                 [    9    ]</span>
+<span class="sd">                 [    10    ]</span>
+<span class="sd">                 [    11    ]</span>
+<span class="sd">               [10 11 12 13 14]</span>
+<span class="sd">               [11 12 13 14  0]</span>
+<span class="sd">               [12 13 14  0 0]]</span>
+<span class="sd">    overlapping_windows(X, 6, 2)</span>
+<span class="sd">    X_windows =[[0 0 0 1 2 3]</span>
+<span class="sd">                [0 1 2 3 4 5]</span>
+<span class="sd">                [2 3 4 5 6 7]</span>
+<span class="sd">                [4 5 6 7 8 9]</span>
+<span class="sd">                [6 7 8 9 10 11]</span>
+<span class="sd">                [8 9 10 11 12 13]</span>
+<span class="sd">                [10 11 12 13 14 0]</span>
+<span class="sd">                [11 12 14  0  0 0]]</span>
+
+<span class="sd">    Initially inspired by Kyle Kastner&#39;s &quot;overlap&quot; https://gist.github.com/kastnerkyle/179d6e9a88202ab0a2fe</span>
+<span class="sd">     but completely rewritten for my needs/specifications</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">assert</span> <span class="n">window_size</span> <span class="o">&gt;</span> <span class="mi">2</span><span class="o">*</span><span class="n">overlap</span><span class="p">,</span> <span class="s2">&quot;Error, windowsize(=&quot;</span><span class="o">+</span><span class="nb">str</span><span class="p">(</span><span class="n">window_size</span><span class="p">)</span><span class="o">+</span> \
+        <span class="s2">&quot;) must be at least twice overlap(=&quot;</span><span class="o">+</span><span class="nb">str</span><span class="p">(</span><span class="n">overlap</span><span class="p">)</span><span class="o">+</span><span class="s1">&#39;)&#39;</span>
+
+    <span class="c1"># pad zeros on the front and rear equal to overlap</span>
+    <span class="n">X_padded</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">pad</span><span class="p">(</span><span class="n">X</span><span class="p">,(</span><span class="n">overlap</span><span class="p">,</span><span class="n">overlap</span><span class="p">),</span><span class="s1">&#39;constant&#39;</span><span class="p">,</span><span class="n">constant_values</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="c1"># figure out info about new array</span>
+    <span class="n">unique_per_window</span> <span class="o">=</span> <span class="n">window_size</span> <span class="o">-</span> <span class="mi">2</span><span class="o">*</span><span class="n">overlap</span>
+    <span class="n">n_windows</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">X</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">/</span> <span class="n">unique_per_window</span><span class="p">))</span>
+
+    <span class="c1"># now make sure X_padded is an integer multiple of window_size</span>
+    <span class="n">extra_pad</span> <span class="o">=</span> <span class="n">window_size</span> <span class="o">-</span> <span class="p">(</span><span class="n">X_padded</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">%</span> <span class="n">window_size</span><span class="p">)</span>   <span class="c1"># how much more we need to pad on end</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">extra_pad</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">):</span>
+        <span class="n">X_padded</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">pad</span><span class="p">(</span><span class="n">X_padded</span><span class="p">,(</span><span class="mi">0</span><span class="p">,</span><span class="n">extra_pad</span><span class="p">),</span><span class="s1">&#39;constant&#39;</span><span class="p">,</span><span class="n">constant_values</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="c1"># now figure out the new shape for the new array</span>
+    <span class="n">strides</span> <span class="o">=</span> <span class="p">(</span><span class="n">X_padded</span><span class="o">.</span><span class="n">itemsize</span><span class="o">*</span><span class="p">(</span><span class="n">window_size</span> <span class="o">-</span> <span class="mi">2</span><span class="o">*</span><span class="n">overlap</span><span class="p">),</span> <span class="n">X_padded</span><span class="o">.</span><span class="n">itemsize</span><span class="p">)</span>
+    <span class="n">X_windows</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">lib</span><span class="o">.</span><span class="n">stride_tricks</span><span class="o">.</span><span class="n">as_strided</span><span class="p">(</span><span class="n">X_padded</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="n">n_windows</span><span class="p">,</span> <span class="n">window_size</span><span class="p">),</span> <span class="n">strides</span><span class="o">=</span><span class="n">strides</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">X_windows</span></div>
+
+
+<div class="viewcode-block" id="undo_overlapping_windows"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.undo_overlapping_windows">[docs]</a><span class="k">def</span> <span class="nf">undo_overlapping_windows</span><span class="p">(</span><span class="n">X_windows</span><span class="p">,</span> <span class="n">overlap</span><span class="p">):</span>  <span class="c1"># inverse of above</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Inverse of overlapping_windows</span>
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    X_windows: ndarray, shape=(n_windows, window_size)</span>
+<span class="sd">        The array of windowed input signal</span>
+<span class="sd">    overlap: int</span>
+<span class="sd">         The amount of overlap that is to be undone</span>
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    X_out: ndarray, shape=(signal_length)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">num_windows</span> <span class="o">=</span> <span class="n">X_windows</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">window_size</span> <span class="o">=</span> <span class="n">X_windows</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+    <span class="n">unique_per_window</span> <span class="o">=</span> <span class="n">window_size</span> <span class="o">-</span> <span class="mi">2</span><span class="o">*</span><span class="n">overlap</span>
+    <span class="n">X_out</span> <span class="o">=</span> <span class="n">X_windows</span><span class="p">[:,</span><span class="n">overlap</span><span class="p">:</span> <span class="n">window_size</span><span class="o">-</span><span class="n">overlap</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">X_out</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="sequential_windows"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.sequential_windows">[docs]</a><span class="k">def</span> <span class="nf">sequential_windows</span><span class="p">(</span><span class="n">signal</span><span class="p">,</span> <span class="n">window_size</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;like overlapping windows, except each window advances by 1 sample&quot;&quot;&quot;</span>
+    <span class="n">shape</span> <span class="o">=</span> <span class="p">(</span><span class="n">signal</span><span class="o">.</span><span class="n">size</span> <span class="o">-</span> <span class="n">window_size</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">window_size</span><span class="p">)</span>
+    <span class="n">strides</span> <span class="o">=</span> <span class="n">signal</span><span class="o">.</span><span class="n">strides</span> <span class="o">*</span> <span class="mi">2</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">lib</span><span class="o">.</span><span class="n">stride_tricks</span><span class="o">.</span><span class="n">as_strided</span><span class="p">(</span><span class="n">signal</span><span class="p">,</span> <span class="n">shape</span><span class="o">=</span><span class="n">shape</span><span class="p">,</span> <span class="n">strides</span><span class="o">=</span><span class="n">strides</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="undo_sequential_windows"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.undo_sequential_windows">[docs]</a><span class="k">def</span> <span class="nf">undo_sequential_windows</span><span class="p">(</span><span class="n">stack</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;inverse of sequential_windows()&quot;&quot;&quot;</span>
+    <span class="n">window_size</span> <span class="o">=</span> <span class="n">stack</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">((</span><span class="n">stack</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span><span class="mi">0</span><span class="p">:</span><span class="n">window_size</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span><span class="n">stack</span><span class="p">[:,</span><span class="o">-</span><span class="mi">1</span><span class="p">]))</span></div>
+
+
+<span class="c1"># generic wrapper for different ways of converting 1-D signal to 2-D stack of windows</span>
+<div class="viewcode-block" id="chopnstack"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.chopnstack">[docs]</a><span class="k">def</span> <span class="nf">chopnstack</span><span class="p">(</span><span class="n">signal</span><span class="p">,</span> <span class="n">chunk_size</span><span class="o">=</span><span class="mi">8192</span><span class="p">,</span> <span class="n">overlap</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Chop&#39;n&#39;Stack:  Cuts up a signal into chunks and stacks them vertically. Pad with zeros</span>
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    sig:   signal, ndarray, shape=(batch_size, signal_length)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">sequential_windows</span><span class="p">(</span><span class="n">signal</span><span class="p">,</span> <span class="n">chunk_size</span><span class="p">)</span>
+    <span class="k">if</span> <span class="kc">False</span><span class="p">:</span>
+        <span class="n">unique_per_chunk</span> <span class="o">=</span> <span class="n">chunk_size</span> <span class="o">-</span> <span class="mi">2</span><span class="o">*</span><span class="n">overlap</span>
+        <span class="n">num_chunks</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">sig</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">/</span> <span class="n">unique_per_chunk</span><span class="p">))</span>
+
+
+        <span class="n">batch_size</span> <span class="o">=</span> <span class="n">sig</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;we think batch_size = &quot;</span><span class="p">,</span><span class="n">batch_size</span><span class="p">)</span>
+        <span class="k">if</span> <span class="p">(</span><span class="mi">0</span> <span class="o">==</span> <span class="n">overlap</span><span class="p">):</span>  <span class="c1"># if this can be fast &amp; easy</span>
+            <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">sig</span><span class="p">,</span> <span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">num_chunks</span><span class="p">,</span> <span class="n">chunk_size</span><span class="p">))</span>
+
+        <span class="n">stack</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">num_chunks</span><span class="p">,</span> <span class="n">chunk_size</span><span class="p">),</span><span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">bi</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">batch_size</span><span class="p">):</span>
+            <span class="n">stack</span><span class="p">[</span><span class="n">bi</span><span class="p">,:,:]</span> <span class="o">=</span> <span class="n">overlapping_windows</span><span class="p">(</span><span class="n">sig</span><span class="p">[</span><span class="n">bi</span><span class="p">,:],</span> <span class="n">chunk_size</span><span class="p">,</span> <span class="n">overlap</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">stack</span></div>
+
+
+<span class="c1"># Inverse of Chop&#39;n&#39;Stack: takes vertical stack and produces 1-D signal</span>
+<div class="viewcode-block" id="inv_chopnstack"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.inv_chopnstack">[docs]</a><span class="k">def</span> <span class="nf">inv_chopnstack</span><span class="p">(</span><span class="n">stack</span><span class="p">,</span> <span class="n">overlap</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">signal_length</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Inverse chopnstack</span>
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    stack : ndarray, shape=(batch_size, num_chunks, chunk_size)</span>
+<span class="sd">        Input signal to window and overlap</span>
+<span class="sd">    overlap : int</span>
+<span class="sd">        Number of elements that are overlapping on on each side (zero pads on ends)</span>
+<span class="sd">    signal_length: int</span>
+<span class="sd">        Specifying this will truncate the output signal(s) to remove any zero-padding</span>
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    sig : signal, shape=(batch_size, signal_length)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">undo_sequential_windows</span><span class="p">(</span><span class="n">stack</span><span class="p">)</span>
+    <span class="k">if</span> <span class="kc">False</span><span class="p">:</span>
+        <span class="n">batch_size</span> <span class="o">=</span> <span class="n">stack</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">if</span> <span class="p">(</span><span class="mi">0</span><span class="o">==</span><span class="n">overlap</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="mi">1</span> <span class="o">==</span> <span class="n">batch_size</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">stack</span><span class="o">.</span><span class="n">ravel</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="kc">None</span><span class="o">==</span><span class="n">signal_length</span><span class="p">:</span>
+            <span class="n">signal_length</span> <span class="o">=</span> <span class="n">stack</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">*</span><span class="n">stack</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+
+        <span class="n">sig</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">signal_length</span><span class="p">),</span><span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">bi</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">batch_index</span><span class="p">):</span>
+            <span class="n">sig</span><span class="p">[</span><span class="n">bi</span><span class="p">,:]</span> <span class="o">=</span> <span class="n">undo_overlapping_windows</span><span class="p">(</span><span class="n">stack</span><span class="p">[</span><span class="n">bi</span><span class="p">],</span> <span class="n">overlap</span><span class="o">=</span><span class="n">overlap</span><span class="p">)[</span><span class="mi">0</span><span class="p">:</span><span class="n">signal_length</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">sig</span></div>
+
+
+<div class="viewcode-block" id="slice_prediction"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.slice_prediction">[docs]</a><span class="k">def</span> <span class="nf">slice_prediction</span><span class="p">(</span><span class="n">stack</span><span class="p">,</span><span class="n">mode</span><span class="o">=</span><span class="s1">&#39;last&#39;</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Slices the output along some column.</span>
+
+<span class="sd">    Called either for computing losses or for visualization</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="p">(</span><span class="s1">&#39;all&#39;</span> <span class="o">==</span> <span class="n">mode</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">inv_chopnstack</span><span class="p">(</span><span class="n">stack</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;last&#39;</span> <span class="o">==</span> <span class="n">mode</span><span class="p">):</span>  <span class="c1"># last column</span>
+        <span class="k">return</span> <span class="n">stack</span><span class="p">[:,:,</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;center&#39;</span> <span class="o">==</span> <span class="n">mode</span><span class="p">):</span>
+        <span class="n">ncols</span> <span class="o">=</span> <span class="n">stack</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">stack</span><span class="p">[:,:,</span><span class="nb">int</span><span class="p">(</span><span class="n">ncols</span><span class="o">/</span><span class="mi">2</span><span class="p">)]</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">raise</span><span class="p">(</span><span class="ne">ValueError</span><span class="p">,</span><span class="s2">&quot;Invalid mode = &#39;&quot;</span><span class="o">+</span><span class="n">mode</span><span class="o">+</span><span class="s2">&quot;&#39;&quot;</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="make_report"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.make_report">[docs]</a><span class="k">def</span> <span class="nf">make_report</span><span class="p">(</span><span class="n">input_var</span><span class="p">,</span> <span class="n">target_var</span><span class="p">,</span> <span class="n">wave_form</span><span class="p">,</span> <span class="n">loss_log</span><span class="p">,</span> <span class="n">outfile</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">epoch</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">show_input</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">diff</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">mu_law</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Routine for printing progress of execution, e.g. graphs to files</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># --------------</span>
+    <span class="c1"># make figure</span>
+    <span class="c1">#--------------</span>
+    <span class="n">num_signal_plots</span> <span class="o">=</span> <span class="mi">3</span>
+    <span class="n">fig</span><span class="p">,</span> <span class="n">panels</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">num_signal_plots</span><span class="o">+</span><span class="mi">2</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mf">8.5</span><span class="p">,</span><span class="mi">11</span><span class="p">),</span><span class="n">dpi</span><span class="o">=</span><span class="mi">120</span> <span class="p">)</span>
+    <span class="n">lw</span>    <span class="o">=</span>   <span class="mi">1</span>    <span class="c1"># line width</span>
+
+    <span class="c1"># top panel: loss history</span>
+    <span class="n">panels</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="n">loss_log</span><span class="o">.</span><span class="n">name</span><span class="o">+</span><span class="s1">&#39;, Epoch &#39;</span><span class="o">+</span><span class="nb">str</span><span class="p">(</span><span class="n">loss_log</span><span class="o">.</span><span class="n">history</span><span class="p">[</span><span class="s1">&#39;Epoch&#39;</span><span class="p">][</span><span class="o">-</span><span class="mi">1</span><span class="p">]))</span>
+    <span class="n">ehist</span> <span class="o">=</span> <span class="n">loss_log</span><span class="o">.</span><span class="n">history</span><span class="p">[</span><span class="s1">&#39;Epoch&#39;</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;Train&#39;</span><span class="p">,</span><span class="s1">&#39;Val&#39;</span><span class="p">):</span>
+        <span class="n">panels</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">loglog</span><span class="p">(</span><span class="n">ehist</span><span class="p">,</span> <span class="n">loss_log</span><span class="o">.</span><span class="n">history</span><span class="p">[</span><span class="n">key</span><span class="p">],</span> <span class="n">label</span><span class="o">=</span><span class="n">key</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="n">lw</span><span class="p">)</span>
+
+
+    <span class="n">panels</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;Loss&#39;</span><span class="p">)</span>
+    <span class="n">panels</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;Epoch&#39;</span><span class="p">)</span>
+    <span class="n">panels</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">legend</span><span class="p">(</span><span class="n">loc</span><span class="o">=</span><span class="s1">&#39;lower left&#39;</span><span class="p">)</span>
+    <span class="n">xmin</span> <span class="o">=</span> <span class="mi">1</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">ehist</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">100</span><span class="p">):</span>  <span class="c1"># ignore the 1st 10 epochs (better when plotting with loglog scale)</span>
+        <span class="n">xmin</span> <span class="o">=</span> <span class="mi">100</span>
+    <span class="n">panels</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_xlim</span><span class="p">(</span><span class="n">left</span><span class="o">=</span><span class="n">xmin</span><span class="p">)</span>
+    <span class="c1">#panels[0].set_ylim(bottom=1e-4)#, top=loss_log.history[&#39;Val&#39;][xmin] )</span>
+
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">input_var</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">):</span>  <span class="c1"># exit, just show loss graph and get out</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="n">outfile</span><span class="o">+</span><span class="s1">&#39;.pdf&#39;</span><span class="p">)</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">close</span><span class="p">(</span><span class="n">fig</span><span class="p">)</span>
+        <span class="k">return</span>
+
+    <span class="c1"># convert to 1D numpy arrays</span>
+    <span class="n">inp</span> <span class="o">=</span> <span class="n">slice_prediction</span><span class="p">(</span><span class="n">input_var</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">(),</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span><span class="o">.</span><span class="n">T</span>
+    <span class="n">tar</span> <span class="o">=</span> <span class="n">slice_prediction</span><span class="p">(</span><span class="n">target_var</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">(),</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span><span class="o">.</span><span class="n">T</span>
+    <span class="n">wf</span> <span class="o">=</span> <span class="n">slice_prediction</span><span class="p">(</span><span class="n">wave_form</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">(),</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span><span class="o">.</span><span class="n">T</span>
+    <span class="c1">#print(&quot;inp.shape = &quot;,inp.shape)</span>
+
+    <span class="k">if</span> <span class="n">mu_law</span><span class="p">:</span>
+        <span class="n">inp</span> <span class="o">=</span> <span class="n">st_audio</span><span class="o">.</span><span class="n">decode_mu_law</span><span class="p">(</span><span class="n">inp</span><span class="p">)</span>
+        <span class="n">tar</span> <span class="o">=</span> <span class="n">st_audio</span><span class="o">.</span><span class="n">decode_mu_law</span><span class="p">(</span><span class="n">tar</span><span class="p">)</span>
+        <span class="n">wf</span>  <span class="o">=</span> <span class="n">st_audio</span><span class="o">.</span><span class="n">decode_mu_law</span><span class="p">(</span><span class="n">wf</span><span class="p">)</span>
+
+    <span class="c1"># middle panels: sample function(s)</span>
+    <span class="n">plot_len</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">inp</span><span class="p">))</span>      <span class="c1"># number of samples to show in the plot</span>
+    <span class="k">for</span> <span class="n">signal_plot</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_signal_plots</span><span class="p">):</span>
+        <span class="n">p</span> <span class="o">=</span> <span class="n">signal_plot</span><span class="o">+</span><span class="mi">1</span>
+        <span class="k">if</span> <span class="p">(</span><span class="mi">0</span><span class="o">==</span><span class="n">signal_plot</span><span class="p">):</span>
+            <span class="n">panels</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">inp</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="n">plot_len</span><span class="p">],</span> <span class="s1">&#39;b-&#39;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Input&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="n">lw</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="p">(</span><span class="n">signal_plot</span> <span class="o">&gt;=</span><span class="mi">1</span><span class="p">):</span>
+            <span class="n">panels</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">tar</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="n">plot_len</span><span class="p">],</span> <span class="s1">&#39;r-&#39;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Target&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="n">lw</span><span class="p">)</span>
+        <span class="k">if</span> <span class="p">(</span><span class="mi">2</span><span class="o">==</span><span class="n">signal_plot</span><span class="p">):</span>
+            <span class="n">panels</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">wf</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="n">plot_len</span><span class="p">],</span> <span class="s1">&#39;g-&#39;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Output&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="n">lw</span><span class="p">)</span>
+        <span class="n">ampmax</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="c1"># 1.1*np.max(input_sig)</span>
+        <span class="n">panels</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">set_ylim</span><span class="p">((</span><span class="o">-</span><span class="n">ampmax</span><span class="p">,</span><span class="n">ampmax</span><span class="p">))</span>   <span class="c1"># for consistency</span>
+        <span class="n">panels</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">legend</span><span class="p">(</span><span class="n">loc</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="c1"># panels[3]: plot difference between output and target</span>
+    <span class="n">diffval</span> <span class="o">=</span> <span class="n">wf</span> <span class="o">-</span> <span class="n">tar</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">p</span><span class="o">+</span><span class="mi">1</span>
+    <span class="n">panels</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">diffval</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="n">plot_len</span><span class="p">],</span> <span class="s1">&#39;k-&#39;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Output - Target&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="n">lw</span><span class="p">)</span>
+    <span class="n">panels</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;Output - Target&#39;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="kc">None</span> <span class="o">==</span> <span class="n">outfile</span><span class="p">):</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># Why save to PDF and not PNG? Because most PDF viewers auto-reload</span>
+        <span class="c1">#   on file change :-)   If instead, if you can find a good</span>
+        <span class="c1">#   cross-platform image viewer that reloads, change the next line</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="n">outfile</span><span class="o">+</span><span class="s1">&#39;.pdf&#39;</span><span class="p">)</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">close</span><span class="p">(</span><span class="n">fig</span><span class="p">)</span>
+
+    <span class="c1"># save audio files</span>
+    <span class="n">sr</span> <span class="o">=</span> <span class="mi">44100</span>
+    <span class="c1"># TODO: do we want to write the whole audio file?</span>
+    <span class="n">st_audio</span><span class="o">.</span><span class="n">write_audio_file</span><span class="p">(</span><span class="n">outfile</span><span class="o">+</span><span class="s1">&#39;_input.wav&#39;</span><span class="p">,</span> <span class="n">inp</span><span class="p">,</span> <span class="n">sr</span><span class="p">)</span>
+    <span class="n">st_audio</span><span class="o">.</span><span class="n">write_audio_file</span><span class="p">(</span><span class="n">outfile</span><span class="o">+</span><span class="s1">&#39;_output.wav&#39;</span><span class="p">,</span> <span class="n">wf</span><span class="p">,</span> <span class="n">sr</span><span class="p">)</span>
+    <span class="n">st_audio</span><span class="o">.</span><span class="n">write_audio_file</span><span class="p">(</span><span class="n">outfile</span><span class="o">+</span><span class="s1">&#39;_target.wav&#39;</span><span class="p">,</span> <span class="n">tar</span><span class="p">,</span> <span class="n">sr</span><span class="p">)</span>
+    <span class="k">return</span></div>
+
+
+
+<div class="viewcode-block" id="print_choochoo"><a class="viewcode-back" href="../../signaltrain.html#signaltrain.utils.print_choochoo">[docs]</a><span class="k">def</span> <span class="nf">print_choochoo</span><span class="p">():</span>
+    <span class="sd">&quot;&quot;&quot;Just for fun. Makes a train picture.&quot;&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot; ~.~.~.~.      &quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot; ____    `.    &quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot; ]DD|_n_n_][   &quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot; |__|_______)  &quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot; &#39;oo OOOO oo\_ &quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;~+~+~+~+~+~+~+~&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;SignalTrain &quot;</span><span class="o">+</span><span class="n">__version__</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span></div>
+
+<span class="c1"># EOF</span>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper"><div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../index.html">Documentation overview</a><ul>
+  <li><a href="../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2018, Scott H. Hawley.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 1.7.5</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.11</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

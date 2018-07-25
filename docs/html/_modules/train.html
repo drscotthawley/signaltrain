@@ -1,0 +1,378 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>train &#8212; signaltrain 0.0.1 documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script type="text/javascript" id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script type="text/javascript" src="../_static/jquery.js"></script>
+    <script type="text/javascript" src="../_static/underscore.js"></script>
+    <script type="text/javascript" src="../_static/doctools.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for train</h1><div class="highlight"><pre>
+<span></span><span class="ch">#! /usr/bin/env python3</span>
+<span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="n">__author__</span> <span class="o">=</span> <span class="s1">&#39;Scott H. Hawley&#39;</span>
+<span class="n">__copyright__</span> <span class="o">=</span> <span class="s1">&#39;Scott H. Hawley&#39;</span>
+
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">import</span> <span class="nn">argparse</span>
+<span class="kn">import</span> <span class="nn">signaltrain</span> <span class="k">as</span> <span class="nn">st</span>
+
+
+<div class="viewcode-block" id="calc_loss"><a class="viewcode-back" href="../train.html#train.calc_loss">[docs]</a><span class="k">def</span> <span class="nf">calc_loss</span><span class="p">(</span><span class="n">Y_pred</span><span class="p">,</span> <span class="n">Y_true</span><span class="p">,</span> <span class="n">criterion</span><span class="p">):</span>
+    <span class="c1">#  Y_pred: the output from the network</span>
+    <span class="c1">#  Y_true: the target values</span>
+    <span class="c1">#  criterion: an pytorch loss criterion, e.g. torch.nn.MSELoss()</span>
+
+    <span class="c1"># we may wish to slice the output, i.e. to ignore all but one time-slice</span>
+    <span class="n">ypred</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">slice_prediction</span><span class="p">(</span><span class="n">Y_pred</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">)</span>  <span class="c1"># &#39;center&#39; can allow for non-causal inference</span>
+    <span class="n">ytrue</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">slice_prediction</span><span class="p">(</span><span class="n">Y_true</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">criterion</span><span class="p">(</span><span class="n">ypred</span><span class="p">,</span> <span class="n">ytrue</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="train_model"><a class="viewcode-back" href="../train.html#train.train_model">[docs]</a><span class="k">def</span> <span class="nf">train_model</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span> <span class="n">criterion</span><span class="p">,</span> <span class="n">lambdas</span><span class="p">,</span> <span class="n">train_gen</span><span class="p">,</span> <span class="n">val_gen</span><span class="p">,</span> <span class="n">cmd_args</span><span class="p">,</span> <span class="n">device</span><span class="p">,</span>
+    <span class="n">losslogger</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">start_epoch</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">fs</span><span class="o">=</span><span class="mi">44100</span><span class="p">,</span>
+    <span class="n">retain_graph</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">mu_law</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="mf">1e-14</span><span class="p">,</span> <span class="n">dataset</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+
+    <span class="c1"># arguments from the command line</span>
+    <span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">max_epochs</span><span class="p">,</span> <span class="n">effect</span><span class="p">,</span> <span class="n">sig_length</span><span class="p">)</span> <span class="o">=</span> <span class="p">(</span><span class="n">cmd_args</span><span class="o">.</span><span class="n">batch</span><span class="p">,</span><span class="n">cmd_args</span><span class="o">.</span><span class="n">epochs</span><span class="p">,</span><span class="n">cmd_args</span><span class="o">.</span><span class="n">effect</span><span class="p">,</span><span class="n">cmd_args</span><span class="o">.</span><span class="n">length</span><span class="p">)</span>
+    <span class="p">(</span><span class="n">save_every</span><span class="p">,</span> <span class="n">change_every</span><span class="p">,</span> <span class="n">plot_every</span><span class="p">,</span> <span class="n">model_name</span><span class="p">,</span> <span class="n">chunk_size</span><span class="p">)</span> <span class="o">=</span> <span class="p">(</span><span class="n">cmd_args</span><span class="o">.</span><span class="n">save</span><span class="p">,</span><span class="n">cmd_args</span><span class="o">.</span><span class="n">change</span><span class="p">,</span><span class="n">cmd_args</span><span class="o">.</span><span class="n">plot</span><span class="p">,</span><span class="n">cmd_args</span><span class="o">.</span><span class="n">model</span><span class="p">,</span><span class="n">cmd_args</span><span class="o">.</span><span class="n">chunk</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">losslogger</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">):</span>
+        <span class="n">losslogger</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">LossLogger</span><span class="p">()</span>
+    <span class="n">checkpoint_name</span> <span class="o">=</span> <span class="n">losslogger</span><span class="o">.</span><span class="n">name</span> <span class="o">+</span> <span class="s1">&#39;/checkpoint.pth.tar&#39;</span>
+    <span class="n">progress_outfile</span> <span class="o">=</span> <span class="n">losslogger</span><span class="o">.</span><span class="n">name</span><span class="o">+</span><span class="s1">&#39;/progress&#39;</span>
+
+    <span class="k">for</span> <span class="n">epoch_iter</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span> <span class="o">+</span> <span class="n">max_epochs</span> <span class="o">-</span> <span class="n">start_epoch</span><span class="p">):</span> <span class="c1"># start w/ 1 so can plot log/log scale</span>
+        <span class="n">epoch</span> <span class="o">=</span> <span class="n">start_epoch</span> <span class="o">+</span> <span class="n">epoch_iter</span>
+
+        <span class="c1"># generate new data every now &amp; then</span>
+        <span class="k">if</span>  <span class="p">(</span><span class="mi">0</span> <span class="o">==</span> <span class="n">epoch_iter</span> <span class="o">%</span> <span class="n">change_every</span><span class="p">)</span> <span class="ow">or</span> <span class="p">(</span><span class="mi">1</span><span class="o">==</span><span class="n">epoch_iter</span><span class="p">):</span>
+            <span class="n">X_train</span><span class="p">,</span> <span class="n">Y_train</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">train_gen</span><span class="p">)</span>
+            <span class="n">train_gen</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>    <span class="c1"># tell generator to read from a new file next time</span>
+            <span class="n">X_val</span><span class="p">,</span> <span class="n">Y_val</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">val_gen</span><span class="p">)</span>
+            <span class="n">Ypred_val</span> <span class="o">=</span> <span class="n">Y_val</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;Epoch &#39;</span><span class="p">,</span> <span class="n">epoch</span><span class="p">,</span><span class="s1">&#39; /&#39;</span><span class="p">,</span> <span class="n">max_epochs</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s2">&quot;:&quot;</span><span class="p">)</span>
+
+        <span class="c1"># technically, batches are usually the &#39;0&#39; index; for now we&#39;re treating</span>
+        <span class="c1"># time steps as if they were batches, using index 1</span>
+        <span class="n">n_batches</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">X_train</span><span class="o">.</span><span class="n">size</span><span class="p">()[</span><span class="mi">1</span><span class="p">]</span> <span class="o">/</span> <span class="n">batch_size</span><span class="p">)</span>
+        <span class="n">epoch_loss</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">batch_num</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_batches</span><span class="p">):</span>  <span class="c1"># inside this loop is &quot;per batch&quot;</span>
+
+            <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>                 <span class="c1"># get ready to accumulate new gradients</span>
+
+            <span class="c1"># to avoid CUDA out of memory, only send batches to the GPU</span>
+            <span class="n">bgn</span><span class="p">,</span> <span class="n">end</span> <span class="o">=</span> <span class="n">batch_num</span><span class="o">*</span><span class="n">batch_size</span><span class="p">,</span> <span class="nb">min</span><span class="p">(</span> <span class="p">(</span><span class="n">batch_num</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">X_train</span><span class="o">.</span><span class="n">size</span><span class="p">()[</span><span class="mi">1</span><span class="p">])</span>
+            <span class="n">X_batch</span> <span class="o">=</span> <span class="n">X_train</span><span class="p">[:,</span><span class="n">bgn</span><span class="p">:</span><span class="n">end</span><span class="p">,:]</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>     <span class="c1"># input signal,</span>
+            <span class="n">Y_batch</span> <span class="o">=</span> <span class="n">Y_train</span><span class="p">[:,</span><span class="n">bgn</span><span class="p">:</span><span class="n">end</span><span class="p">,:]</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>     <span class="c1"># target output</span>
+            <span class="n">Y_pred</span><span class="p">,</span> <span class="n">layers</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">X_batch</span><span class="p">)</span>               <span class="c1"># predicted output</span>
+
+            <span class="c1"># A solution needs to be found in order to obtain a variable from the model here.</span>
+            <span class="c1"># Let&#39;s call it &quot;z&quot; for a moment.</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">layers</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">z</span> <span class="o">=</span> <span class="n">layers</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="n">reg_term</span> <span class="o">=</span> <span class="n">z</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="mf">1e-4</span>
+
+            <span class="n">loss</span> <span class="o">=</span> <span class="n">calc_loss</span><span class="p">(</span><span class="n">Y_pred</span><span class="p">,</span> <span class="n">Y_batch</span><span class="p">,</span> <span class="n">criterion</span><span class="p">)</span>
+            <span class="n">epoch_loss</span> <span class="o">+=</span> <span class="n">loss</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+            <span class="n">X_batch</span><span class="p">,</span> <span class="n">Y_batch</span><span class="p">,</span> <span class="n">Y_pred</span> <span class="o">=</span> <span class="n">X_batch</span><span class="o">.</span><span class="n">cpu</span><span class="p">(),</span> <span class="n">Y_batch</span><span class="o">.</span><span class="n">cpu</span><span class="p">(),</span> <span class="n">Y_pred</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span>  <span class="c1"># free up VRAM</span>
+            <span class="n">st</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">progbar</span><span class="p">(</span><span class="n">epoch</span><span class="p">,</span> <span class="n">max_epochs</span><span class="p">,</span> <span class="n">batch_num</span><span class="p">,</span> <span class="n">n_batches</span><span class="p">,</span> <span class="n">epoch_loss</span><span class="o">/</span><span class="p">(</span><span class="n">batch_num</span><span class="o">+</span><span class="mi">1</span><span class="p">))</span>  <span class="c1"># show a progress bar through the epoch</span>
+
+            <span class="c1">#reg_term = loss * 1e-4 # Dumb regularization for the moment</span>
+
+            <span class="c1"># Apply regularization to loss</span>
+            <span class="c1"># loss += reg_term</span>
+
+            <span class="c1"># Perform optimization / gradient descent</span>
+            <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">(</span><span class="n">retain_graph</span><span class="o">=</span><span class="n">retain_graph</span><span class="p">)</span>    <span class="c1"># usually retain_graph=False unless we use an RNN</span>
+            <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+
+        <span class="c1">#if loss.data.cpu().numpy() &lt; tol:   # commented out: if it hits a patch of zeros, we don&#39;t exit</span>
+        <span class="c1">#    break</span>
+        <span class="n">epoch_loss</span> <span class="o">/=</span> <span class="n">n_batches</span>
+
+        <span class="c1">#----- after full dataset run through (all batches),do various reporting &amp; diagnostic things</span>
+
+
+        <span class="k">if</span> <span class="p">((</span><span class="n">X_val</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">Y_val</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">)):</span>
+            <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>           <span class="c1"># not tracking gradients saves VRAM, bigtime</span>
+                <span class="n">n_batches</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">X_val</span><span class="o">.</span><span class="n">size</span><span class="p">()[</span><span class="mi">1</span><span class="p">]</span> <span class="o">/</span> <span class="n">batch_size</span><span class="p">)</span>
+                <span class="n">epoch_vloss</span> <span class="o">=</span> <span class="mi">0</span>
+                <span class="k">for</span> <span class="n">batch_num</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_batches</span><span class="p">):</span>
+                    <span class="c1">#X_val, Y_val = X_val.to(device), Y_val.to(device)</span>
+                    <span class="n">bgn</span><span class="p">,</span> <span class="n">end</span> <span class="o">=</span> <span class="n">batch_num</span><span class="o">*</span><span class="n">batch_size</span><span class="p">,</span> <span class="nb">min</span><span class="p">(</span> <span class="p">(</span><span class="n">batch_num</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">X_val</span><span class="o">.</span><span class="n">size</span><span class="p">()[</span><span class="mi">1</span><span class="p">])</span>
+                    <span class="n">X_batch</span> <span class="o">=</span> <span class="n">X_val</span><span class="p">[:,</span><span class="n">bgn</span><span class="p">:</span><span class="n">end</span><span class="p">,:]</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>     <span class="c1"># input signal,</span>
+                    <span class="n">Y_batch</span> <span class="o">=</span> <span class="n">Y_val</span><span class="p">[:,</span><span class="n">bgn</span><span class="p">:</span><span class="n">end</span><span class="p">,:]</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>     <span class="c1"># target output</span>
+                    <span class="n">Ypred_val_batch</span><span class="p">,</span> <span class="n">layers_pred</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">X_batch</span><span class="p">)</span>
+                    <span class="n">vloss</span> <span class="o">=</span> <span class="n">calc_loss</span><span class="p">(</span><span class="n">Ypred_val_batch</span><span class="p">,</span> <span class="n">Y_batch</span><span class="p">,</span> <span class="n">criterion</span><span class="p">)</span>
+                    <span class="n">epoch_vloss</span> <span class="o">+=</span> <span class="n">vloss</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+                    <span class="n">Ypred_val</span><span class="p">[:,</span><span class="n">bgn</span><span class="p">:</span><span class="n">end</span><span class="p">,:]</span> <span class="o">=</span> <span class="n">Ypred_val_batch</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span>  <span class="c1"># save the prediction for plotting later</span>
+                    <span class="c1">#X_val, Y_val, Ypred_val = X_val.cpu(), Y_val.cpu(), Ypred_val.cpu()  # free up VRAM on the GPU</span>
+                <span class="n">epoch_vloss</span> <span class="o">/=</span> <span class="n">n_batches</span>
+            <span class="n">losslogger</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">epoch</span><span class="p">,</span> <span class="n">epoch_loss</span><span class="p">,</span> <span class="n">epoch_vloss</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">epoch</span> <span class="o">&gt;</span> <span class="n">start_epoch</span><span class="p">):</span>
+            <span class="k">if</span> <span class="p">(</span><span class="mi">0</span> <span class="o">==</span> <span class="n">epoch</span> <span class="o">%</span> <span class="n">save_every</span><span class="p">)</span> <span class="ow">or</span> <span class="p">(</span><span class="n">epoch</span> <span class="o">&gt;=</span> <span class="n">max_epochs</span><span class="o">-</span><span class="mi">1</span><span class="p">):</span>
+                <span class="n">st</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">save_checkpoint</span><span class="p">({</span><span class="s1">&#39;epoch&#39;</span><span class="p">:</span> <span class="n">epoch</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="s1">&#39;state_dict&#39;</span><span class="p">:</span> <span class="n">model</span><span class="o">.</span><span class="n">state_dict</span><span class="p">(),</span>
+                    <span class="s1">&#39;optimizer&#39;</span><span class="p">:</span> <span class="n">optimizer</span><span class="o">.</span><span class="n">state_dict</span><span class="p">(),</span> <span class="s1">&#39;losslogger&#39;</span><span class="p">:</span> <span class="n">losslogger</span><span class="p">,},</span>
+                    <span class="n">filename</span><span class="o">=</span><span class="n">checkpoint_name</span><span class="p">,</span> <span class="n">best_only</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">is_best</span><span class="o">=</span><span class="n">losslogger</span><span class="o">.</span><span class="n">is_best</span><span class="p">()</span> <span class="p">)</span>
+
+            <span class="k">if</span> <span class="p">(</span><span class="mi">0</span> <span class="o">==</span> <span class="n">epoch</span> <span class="o">%</span> <span class="n">plot_every</span><span class="p">):</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Writing progress report to &quot;</span><span class="p">,</span><span class="n">progress_outfile</span><span class="p">,</span><span class="s1">&#39;.*&#39;</span><span class="p">,</span><span class="n">sep</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+                <span class="n">st</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">make_report</span><span class="p">(</span><span class="n">X_val</span><span class="p">,</span> <span class="n">Y_val</span><span class="p">,</span> <span class="n">Ypred_val</span><span class="p">,</span> <span class="n">losslogger</span><span class="p">,</span> <span class="n">outfile</span><span class="o">=</span><span class="n">progress_outfile</span><span class="p">,</span> <span class="n">epoch</span><span class="o">=</span><span class="n">epoch</span><span class="p">,</span> <span class="n">mu_law</span><span class="o">=</span><span class="n">mu_law</span><span class="p">)</span>
+                <span class="n">st</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">model_viz</span><span class="p">(</span><span class="n">model</span><span class="p">,</span><span class="n">progress_outfile</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">model</span></div>
+
+
+<span class="c1"># One additional model evaluation on Test or Val data</span>
+<div class="viewcode-block" id="eval_model"><a class="viewcode-back" href="../train.html#train.eval_model">[docs]</a><span class="k">def</span> <span class="nf">eval_model</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">criterion</span><span class="p">,</span> <span class="n">lambdas</span><span class="p">,</span> <span class="n">losslogger</span><span class="p">,</span> <span class="n">sig_length</span><span class="p">,</span> <span class="n">chunk_size</span><span class="p">,</span> <span class="n">device</span><span class="p">,</span> <span class="n">effect</span><span class="p">,</span>
+    <span class="n">fs</span><span class="o">=</span><span class="mi">44100</span><span class="p">,</span> <span class="n">X</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">Y</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">mu_law</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+    <span class="c1"># X_test=input, Y_test=target (optional_cal be regenerated)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">Evaluating model: loss_num=&quot;</span><span class="p">,</span><span class="n">end</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="p">(</span><span class="kc">None</span> <span class="o">==</span> <span class="n">X</span><span class="p">):</span>
+        <span class="n">X_test</span><span class="p">,</span> <span class="n">Y_test</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">audio</span><span class="o">.</span><span class="n">gen_audio</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">sig_length</span><span class="o">/</span><span class="mi">5</span><span class="p">),</span> <span class="n">device</span><span class="p">,</span> <span class="n">chunk_size</span><span class="o">=</span><span class="n">chunk_size</span><span class="p">,</span>
+            <span class="n">effect</span><span class="o">=</span><span class="n">effect</span><span class="p">,</span> <span class="n">input_var</span><span class="o">=</span><span class="n">X_train</span><span class="p">,</span> <span class="n">target_var</span><span class="o">=</span><span class="n">Y_train</span><span class="p">)</span>
+        <span class="c1"># st.audio.gen_audio(sig_length, chunk_size=chunk_size, effect=effect)</span>
+    <span class="n">Y_pred</span><span class="p">,</span> <span class="n">layers_pred</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">X</span><span class="p">)</span>    <span class="c1"># run network forward</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="n">calc_loss</span><span class="p">(</span><span class="n">Y_pred</span><span class="p">,</span> <span class="n">Y_test</span><span class="p">,</span> <span class="n">criterion</span><span class="p">,</span> <span class="n">lambdas</span><span class="p">)</span>
+    <span class="n">loss_num</span> <span class="o">=</span> <span class="n">loss</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">loss_num</span><span class="p">)</span>
+    <span class="n">outfile</span> <span class="o">=</span> <span class="s1">&#39;final&#39;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Saving final Test evaluation report to &quot;</span><span class="p">,</span><span class="n">outfile</span><span class="p">,</span><span class="s2">&quot;.*&quot;</span><span class="p">,</span><span class="n">sep</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">st</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">make_report</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">Y</span><span class="p">,</span> <span class="n">Ypred</span><span class="p">,</span> <span class="n">losslogger</span><span class="p">,</span> <span class="n">outfile</span><span class="o">=</span><span class="n">outfile</span><span class="p">,</span> <span class="n">mu_law</span><span class="o">=</span><span class="n">mu_law</span><span class="p">)</span>
+    <span class="k">return</span></div>
+
+
+<span class="c1">#-------------------------------------------------------------------------------</span>
+<span class="c1">#                                MAIN BLOCK</span>
+<span class="c1">#-------------------------------------------------------------------------------</span>
+<div class="viewcode-block" id="main"><a class="viewcode-back" href="../train.html#train.main">[docs]</a><span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
+
+    <span class="c1"># set random seeds: useful for ensuring similar initializations when testing different (hyper)parameters</span>
+    <span class="n">torch</span><span class="o">.</span><span class="n">manual_seed</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+
+    <span class="c1">#-------------------------------</span>
+    <span class="c1"># Parse command line arguments</span>
+    <span class="c1">#-------------------------------</span>
+    <span class="n">chunk_max</span> <span class="o">=</span> <span class="mi">15000</span>     <span class="c1"># roughly the maximum model size that will fit in memory on Titan X Pascal GPU</span>
+                          <span class="c1"># if you immediately get OOM errors, decrease chunk_max</span>
+    <span class="n">batch_size</span> <span class="o">=</span> <span class="mi">100</span>      <span class="c1"># one big batch (e.g. 8000) runs faster per epoch, but smaller batches converge faster</span>
+    <span class="n">fs</span> <span class="o">=</span> <span class="mi">44100</span>
+    <span class="n">length</span> <span class="o">=</span> <span class="n">fs</span> <span class="o">*</span> <span class="mi">5</span>     <span class="c1"># 5 seconds of audio</span>
+
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="s1">&#39;trains SignalTrain effects mapper&#39;</span><span class="p">,</span> <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentDefaultsHelpFormatter</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--batch&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">batch_size</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Batch size&quot;</span><span class="p">)</span>  <span class="c1"># TODO: get batch_size&gt;1 working</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--change&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Changed data every this many epochs&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--chunk&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">chunk_max</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Length of each &#39;chunk&#39; or window that input signal is chopped up into&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--effect&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s1">&#39;comp&#39;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Audio effect to try. Names are in signaltrain/audio.py. (default=&#39;ta&#39; for time-alignment)&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--epochs&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">10000</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Number of iterations to train for&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--fs&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">fs</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Sample rate in Hertz&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--lambdas&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s1">&#39;0.0,0.0&#39;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Comma-separated list of regularization penalty parameters, (L1, L2)&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--length&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">length</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Length of each audio signal (then cut up into chunks)&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--lr&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Initial learning rate&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--model&#39;</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;specsg&#39;</span><span class="p">,</span><span class="s1">&#39;spectral&#39;</span><span class="p">,</span><span class="s1">&#39;seq2seq&#39;</span><span class="p">,</span><span class="s1">&#39;wavenet&#39;</span><span class="p">,</span><span class="s1">&#39;specfb&#39;</span><span class="p">,</span><span class="s1">&#39;manyto1&#39;</span><span class="p">],</span>
+                    <span class="n">default</span><span class="o">=</span><span class="s1">&#39;specsg&#39;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Choice of model lto use&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--name&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s1">&#39;run&#39;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Name/tag for this run. Logging goes into dir with this name. &quot;</span><span class="p">)</span>
+    <span class="c1">#TODO: decision: should it overwrite existing directory names, or create a new dir with, e.g. &quot;_1&quot; to avoid overwites?</span>
+    <span class="c1">#      Answer: neither. We append the time &amp; date of the run start to the name of the run, so they&#39;re all unique</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--parallel&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Run in data-parallel mode&quot;</span><span class="p">,</span><span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">)</span>  <span class="c1"># default=False</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--plot&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Plot report every this many epochs&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--save&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Save checkpoint (if best) every this many epochs&quot;</span><span class="p">)</span>
+
+    <span class="c1"># user can load a checkpoint file from a previous run: Either recall &#39;everything&#39; (--resume) or just the weights (--init)</span>
+    <span class="n">group</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">add_mutually_exclusive_group</span><span class="p">()</span>
+    <span class="n">group</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--resume&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">metavar</span><span class="o">=</span><span class="s1">&#39;PATH&#39;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s1">&#39;path to latest checkpoint.  Cannot be used with --init&#39;</span><span class="p">)</span>
+    <span class="n">group</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s1">&#39;--init&#39;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">metavar</span><span class="o">=</span><span class="s1">&#39;PATH&#39;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s1">&#39;initialize weights w/ checkpoint file. Like --resume only w/o logger &amp; optimizer&#39;</span><span class="p">)</span>
+
+    <span class="c1"># TODO: decide how to specify paramaters to audio effects: individual values, or allow &#39;sweeps&#39;?  Probably parse a string.</span>
+
+    <span class="c1"># TODO: add command-line options for input &amp; target audio:  Normally we synthesize everything, but we could:</span>
+    <span class="c1">#    - Read lots of input-target pairs of audio waveforms  (in which case ---effect, above, should be &#39;turned off&#39;)</span>
+    <span class="c1">#    - Read lots input audio, and then apply the desired effect</span>
+    <span class="c1">#    - Assemble input (and target?) audio by pasting together short clips from a library of samples/clips (e.g. of drum sounds)</span>
+
+    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;args = &quot;</span><span class="p">,</span><span class="n">args</span><span class="p">)</span>
+    <span class="n">sig_length</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">length</span>
+    <span class="n">fs</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">fs</span>
+    <span class="n">lambdas</span> <span class="o">=</span> <span class="p">[</span><span class="nb">float</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">args</span><span class="o">.</span><span class="n">lambdas</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;,&#39;</span><span class="p">)]</span> <span class="c1"># turn comma-sep string into list of floats</span>
+
+    <span class="n">st</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">print_choochoo</span><span class="p">()</span>   <span class="c1"># display program info</span>
+
+    <span class="c1">#------------------------------</span>
+    <span class="c1"># Check CUDA/CPU device status</span>
+    <span class="c1">#------------------------------</span>
+    <span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s2">&quot;cuda:0&quot;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s2">&quot;cpu&quot;</span><span class="p">)</span>  <span class="c1"># from pytorch 0.4 migration guide</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Running on device&quot;</span><span class="p">,</span><span class="n">device</span><span class="p">)</span>
+
+
+    <span class="c1">#------------------------------------</span>
+    <span class="c1"># Set up model and training criterion</span>
+    <span class="c1">#------------------------------------</span>
+    <span class="n">retain_graph</span> <span class="o">=</span> <span class="kc">False</span>  <span class="c1"># retain_graph only needed for RNN models. It&#39;s a memory hog</span>
+    <span class="n">mu_law</span> <span class="o">=</span> <span class="kc">False</span> <span class="c1"># with mu-law companding, not only do we scale the floats into ints,</span>
+                  <span class="c1">#  but the regression model should be turned into a multi-class classifier</span>
+                  <span class="c1"># which means the target &amp; output &#39;Y&#39; values should get one-hot encoded</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="s1">&#39;seq2seq&#39;</span> <span class="o">==</span> <span class="n">args</span><span class="o">.</span><span class="n">model</span><span class="p">):</span>
+        <span class="n">model</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">Seq2Seq</span><span class="p">()</span>
+        <span class="n">retain_graph</span><span class="o">=</span><span class="kc">True</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;specsg&#39;</span> <span class="o">==</span> <span class="n">args</span><span class="o">.</span><span class="n">model</span><span class="p">):</span>
+        <span class="n">model</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">SpecShrinkGrow_catri_skipadd</span><span class="p">(</span><span class="n">chunk_size</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">chunk</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;specfb&#39;</span> <span class="o">==</span> <span class="n">args</span><span class="o">.</span><span class="n">model</span><span class="p">):</span>
+        <span class="n">model</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">SpecFrontBack</span><span class="p">(</span><span class="n">chunk_size</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">chunk</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;manyto1&#39;</span> <span class="o">==</span> <span class="n">args</span><span class="o">.</span><span class="n">model</span><span class="p">):</span>
+        <span class="n">model</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">FNNManyToOne</span><span class="p">(</span><span class="n">chunk_size</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">chunk</span><span class="p">)</span>  <span class="c1"># terrible</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;wavenet&#39;</span> <span class="o">==</span> <span class="n">args</span><span class="o">.</span><span class="n">model</span><span class="p">):</span>
+        <span class="n">model</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">WaveNet</span><span class="p">()</span>
+        <span class="n">mu_law</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">model</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">models</span><span class="o">.</span><span class="n">SpecEncDec</span><span class="p">(</span><span class="n">ft_size</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">chunk</span><span class="p">)</span>
+
+    <span class="c1"># Default is serial, not data-parallel execution. But --parallel flag will enable DP</span>
+    <span class="c1">#   In my experiments, DataParallel runs no faster than single-GPU for the same</span>
+    <span class="c1">#   batch size.  It will allow you to run with larger batches, but...that&#39;s it.</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">parallel</span> <span class="ow">and</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">device_count</span><span class="p">()</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Let&#39;s use&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">device_count</span><span class="p">(),</span> <span class="s2">&quot;GPUs!&quot;</span><span class="p">)</span>
+        <span class="n">model</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">DataParallel</span><span class="p">(</span><span class="n">model</span><span class="p">)</span>
+
+    <span class="c1">#----------------------------------------------------------------</span>
+    <span class="c1">#  Set additional training specs based on which model was chosen</span>
+    <span class="c1">#----------------------------------------------------------------</span>
+    <span class="n">losslogger</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">LossLogger</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">model</span> <span class="o">!=</span> <span class="s1">&#39;wavenet&#39;</span><span class="p">):</span>
+        <span class="n">criterion</span> <span class="o">=</span>  <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">MSELoss</span><span class="p">()</span>
+        <span class="n">optimizer</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">Adam</span><span class="p">(</span> <span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="n">lr</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">lr</span><span class="p">,</span> <span class="n">eps</span><span class="o">=</span><span class="mf">5e-6</span><span class="p">)</span>    <span class="c1">#,  amsgrad=True)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Sorry, model &#39;wavenet&#39; isn&#39;t ready yet.&quot;</span><span class="p">)</span>
+        <span class="n">criterion</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">CrossEntropyLoss</span><span class="p">()</span>
+        <span class="n">lambdas</span> <span class="o">=</span> <span class="p">[</span><span class="mf">1.0</span><span class="p">]</span>  <span class="c1"># replace any args.lambdas value because there&#39;s only one loss in wavenet</span>
+        <span class="n">optimizer</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">Adam</span><span class="p">(</span> <span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="n">lr</span><span class="o">=</span><span class="mf">0.01</span><span class="p">)</span>
+
+
+    <span class="c1">#-------------------------------------------------------------------</span>
+    <span class="c1"># Checkpoint recovery (if requested) OR initialize just the weights</span>
+    <span class="c1">#-------------------------------------------------------------------</span>
+    <span class="n">start_epoch</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">if</span> <span class="p">(</span><span class="s1">&#39;&#39;</span> <span class="o">!=</span> <span class="n">args</span><span class="o">.</span><span class="n">resume</span><span class="p">):</span>  <span class="c1"># load weights and omptimizer settings, etc.</span>
+        <span class="n">model</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span> <span class="n">start_epoch</span><span class="p">,</span> <span class="n">losslogger</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">load_checkpoint</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span> <span class="n">losslogger</span><span class="p">,</span> <span class="n">filename</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">resume</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="p">(</span><span class="s1">&#39;&#39;</span> <span class="o">!=</span> <span class="n">args</span><span class="o">.</span><span class="n">init</span><span class="p">):</span>  <span class="c1"># just load weights</span>
+        <span class="n">model</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">load_weights</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">filename</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">init</span><span class="p">)</span>   <span class="c1"># why do this? because I want to try starting from &#39;autoencoder&#39; weights</span>
+
+    <span class="c1">#------------------------------------------------------------------</span>
+    <span class="c1"># Once checkpoints are loaded (or not), CUDA-ify model if possible</span>
+    <span class="c1">#------------------------------------------------------------------</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+
+    <span class="c1"># For pytorch 0.4, manually move optimizer parts to GPU as well.  From https://github.com/pytorch/pytorch/issues/2830</span>
+    <span class="k">for</span> <span class="n">state</span> <span class="ow">in</span> <span class="n">optimizer</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">state</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+                <span class="n">state</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+
+    <span class="c1">#------------------------------------------</span>
+    <span class="c1"># Set up Training and Validation data generators</span>
+    <span class="c1">#------------------------------------------</span>
+    <span class="n">train_gen</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">audio</span><span class="o">.</span><span class="n">gen_audio</span><span class="p">(</span><span class="n">seq_size</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">length</span><span class="p">),</span> <span class="n">chunk_size</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">chunk</span><span class="p">,</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;Train&#39;</span><span class="p">,</span><span class="n">effect</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">effect</span><span class="p">)</span>
+    <span class="n">val_gen</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">audio</span><span class="o">.</span><span class="n">gen_audio</span><span class="p">(</span><span class="n">seq_size</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">length</span><span class="p">),</span> <span class="n">chunk_size</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">chunk</span><span class="p">,</span><span class="n">path</span><span class="o">=</span><span class="s1">&#39;Val&#39;</span><span class="p">,</span> <span class="n">effect</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">effect</span><span class="p">,</span> <span class="n">random_every</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="c1">#--------------------</span>
+    <span class="c1"># Call training Loop</span>
+    <span class="c1">#--------------------</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">train_model</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span> <span class="n">criterion</span><span class="p">,</span> <span class="n">lambdas</span><span class="p">,</span> <span class="n">train_gen</span><span class="p">,</span> <span class="n">val_gen</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">device</span><span class="p">,</span>
+        <span class="n">start_epoch</span><span class="o">=</span><span class="n">start_epoch</span><span class="p">,</span> <span class="n">losslogger</span><span class="o">=</span><span class="n">losslogger</span><span class="p">,</span> <span class="n">fs</span><span class="o">=</span><span class="n">fs</span><span class="p">,</span>
+        <span class="n">retain_graph</span><span class="o">=</span><span class="n">retain_graph</span><span class="p">,</span> <span class="n">mu_law</span><span class="o">=</span><span class="n">mu_law</span><span class="p">)</span>
+
+    <span class="c1">#--------------------------------</span>
+    <span class="c1"># Evaluate model on Test dataset</span>
+    <span class="c1">#--------------------------------</span>
+    <span class="c1"># Broken for now</span>
+    <span class="c1">#eval_model(model, criteria, lambdas, losslogger, sig_length, chunk_size, device, args.effect,</span>
+    <span class="c1">#    fs=fs, effect=args.effect, mu_law=mu_law, dataset=dataset)</span>
+    <span class="k">return</span></div>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+
+<span class="c1"># EOF</span>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper"><div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  <li><a href="index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3>Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" />
+      <input type="submit" value="Go" />
+      <input type="hidden" name="check_keywords" value="yes" />
+      <input type="hidden" name="area" value="default" />
+    </form>
+    </div>
+</div>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2018, Scott H. Hawley.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 1.7.5</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.11</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>
