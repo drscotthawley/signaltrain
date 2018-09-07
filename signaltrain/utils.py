@@ -1,4 +1,4 @@
-
+# -*- coding: utf-8 -*-
 __author__ = 'S.H. Hawley'
 __version__ = '0.0.1'
 
@@ -80,8 +80,6 @@ class LossLogger():
             return True
         return False
 
-
-
 def save_checkpoint(state, filename='checkpoint.pth.tar', best_only=False, is_best=False):
     """
     Saves the 'state' of model and optimization to a file
@@ -96,7 +94,6 @@ def save_checkpoint(state, filename='checkpoint.pth.tar', best_only=False, is_be
         print("Saving checkpoint in",filename)
         torch.save(state, filename)
     return
-
 
 def load_checkpoint(model, optimizer, losslogger, filename='checkpoint.pth.tar'):
     """
@@ -124,7 +121,6 @@ def load_checkpoint(model, optimizer, losslogger, filename='checkpoint.pth.tar')
 
     return model, optimizer, start_epoch, losslogger
 
-
 def load_weights(model, filename='checkpoint.pth.tar'):
     """
     simpler than load_checkpoint(); this ignores everything but the model
@@ -138,122 +134,27 @@ def load_weights(model, filename='checkpoint.pth.tar'):
     return model
 
 
-
-
-def overlapping_windows(X, window_size, overlap):
-    """
-    Create an overlapped version of X
-    Parameters
-    ----------
-    X : ndarray, shape=(n_samples,)
-        Input signal to window and overlap
-    window_size : int
-        Size of windows to take
-    overlap : int
-        Number of elements to overlap by on each side (zero pads on ends)
-    Returns
-    -------
-    X_windows : shape=(n_windows, window_size)
-        2D array of overlapped X
-
-    So, for each window, the amount of 'unique' data will be (window_size - 2*overlap)
-
-    Example:
-    X = np.arange(15)
-    X =  [ 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14]  (15 elements)
-    overlapping_windows(X, 5, 2)
-    X_padded = [ 0 0 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 0 0] (17 elements)
-    X_windows = [[0 0 0 1 2]
-                 [0 0 1 2 3]
-                 [0 1 2 3 4]
-                 [... 3 ...]
-                 [    4    ]
-                 [    5    ]
-                 [    6    ]
-                 [    7    ]
-                 [    8    ]
-                 [    9    ]
-                 [    10    ]
-                 [    11    ]
-               [10 11 12 13 14]
-               [11 12 13 14  0]
-               [12 13 14  0 0]]
-    overlapping_windows(X, 6, 2)
-    X_windows =[[0 0 0 1 2 3]
-                [0 1 2 3 4 5]
-                [2 3 4 5 6 7]
-                [4 5 6 7 8 9]
-                [6 7 8 9 10 11]
-                [8 9 10 11 12 13]
-                [10 11 12 13 14 0]
-                [11 12 14  0  0 0]]
-
-    Initially inspired by Kyle Kastner's "overlap" https://gist.github.com/kastnerkyle/179d6e9a88202ab0a2fe
-     but completely rewritten for my needs/specifications
-    """
-    assert window_size > 2*overlap, "Error, windowsize(="+str(window_size)+ \
-        ") must be at least twice overlap(="+str(overlap)+')'
-
-    # pad zeros on the front and rear equal to overlap
-    X_padded = np.pad(X,(overlap,overlap),'constant',constant_values=0)
-
-    # figure out info about new array
-    unique_per_window = window_size - 2*overlap
-    n_windows = int(np.ceil(X.shape[0] / unique_per_window))
-
-    # now make sure X_padded is an integer multiple of window_size
-    extra_pad = window_size - (X_padded.shape[0] % window_size)   # how much more we need to pad on end
-    if (extra_pad != 0):
-        X_padded = np.pad(X_padded,(0,extra_pad),'constant',constant_values=0)
-
-    # now figure out the new shape for the new array
-    strides = (X_padded.itemsize*(window_size - 2*overlap), X_padded.itemsize)
-    X_windows = np.lib.stride_tricks.as_strided(X_padded, shape=(n_windows, window_size), strides=strides)
-    return X_windows
-
-
-def undo_overlapping_windows(X_windows, overlap):  # inverse of above
-    """
-    Inverse of overlapping_windows
-    Parameters
-    ----------
-    X_windows: ndarray, shape=(n_windows, window_size)
-        The array of windowed input signal
-    overlap: int
-         The amount of overlap that is to be undone
-    Returns
-    -------
-    X_out: ndarray, shape=(signal_length)
-    """
-    num_windows = X_windows.shape[0]
-    window_size = X_windows.shape[1]
-    unique_per_window = window_size - 2*overlap
-    X_out = X_windows[:,overlap: window_size-overlap]
-    return X_out.ravel()
-
-
 def sequential_windows(signal, window_size):
     """like overlapping windows, except each window advances by 1 sample"""
     shape = (signal.size - window_size + 1, window_size)
     strides = signal.strides * 2
     return np.lib.stride_tricks.as_strided(signal, shape=shape, strides=strides)
 
-def undo_sequential_windows(stack):
-    """inverse of sequential_windows()"""
-    window_size = stack.shape[-1]
-    return np.concatenate((stack[0,0:window_size-1],stack[:,-1]))
 
 
 # generic wrapper for different ways of converting 1-D signal to 2-D stack of windows
 def chopnstack(signal, chunk_size=8192, overlap=0, dtype=np.float32):
     """
-    Chop'n'Stack:  Cuts up a signal into chunks and stacks them vertically. Pad with zeros
-    Parameters
+    chop'n'stack:  Generic function that cuts up a signal into chunks and stacks
+                   them vertically. Pad with zeros
+    Parameters:
     ----------
-    sig:   signal, ndarray, shape=(batch_size, signal_length)
+
+    signal:   signal, ndarray, shape=(batch_size, signal_length)
     """
-    return sequential_windows(signal, chunk_size)
-    if False:
+    return sequential_windows(signal, chunk_size)  # just do sequential windows for now
+    '''
+    if False:  # prior method: chop with some amount of overlap
         unique_per_chunk = chunk_size - 2*overlap
         num_chunks = int(np.ceil(sig.shape[1] / unique_per_chunk))
 
@@ -267,55 +168,26 @@ def chopnstack(signal, chunk_size=8192, overlap=0, dtype=np.float32):
         for bi in range(batch_size):
             stack[bi,:,:] = overlapping_windows(sig[bi,:], chunk_size, overlap)
         return stack
+    '''
 
 
-# Inverse of Chop'n'Stack: takes vertical stack and produces 1-D signal
-def inv_chopnstack(stack, overlap=0, signal_length=None):
+
+def slice_prediction(stack, mode='last'):
     """
-    Inverse chopnstack
-    Parameters
-    ----------
-    stack : ndarray, shape=(batch_size, num_chunks, chunk_size)
-        Input signal to window and overlap
-    overlap : int
-        Number of elements that are overlapping on on each side (zero pads on ends)
-    signal_length: int
-        Specifying this will truncate the output signal(s) to remove any zero-padding
-    Returns
-    -------
-    sig : signal, shape=(batch_size, signal_length)
+    Slices the output along one particular column. Used for computing losses or for visualization
+
+    Inputs:
+       stack:   a vertical stack of windowed signals
+       mode:    choice of where to 'slice' the stack:  'last'=on the end, 'center'=in the middle
     """
-    return undo_sequential_windows(stack)
-    if False:
-        batch_size = stack.shape[0]
-        if (0==overlap) and (1 == batch_size):
-            return stack.ravel()
 
-        if None==signal_length:
-            signal_length = stack.shape[1]*stack.shape[2]
-
-        sig = np.zeros((batch_size, signal_length),dtype=dtype)
-        for bi in range(batch_index):
-            sig[bi,:] = undo_overlapping_windows(stack[bi], overlap=overlap)[0:signal_length]
-        return sig
-
-
-def slice_prediction(stack,mode='last'):
-    """
-    Slices the output along some column.
-
-    Called either for computing losses or for visualization
-    """
-    if ('all' == mode):
-        return inv_chopnstack(stack)
-    elif ('last' == mode):  # last column
+    if ('last' == mode):  # last column
         return stack[:,:,-1]
     elif ('center' == mode):
         ncols = stack.shape[-1]
         return stack[:,:,int(ncols/2)]
     else:
         raise(ValueError,"Invalid mode = '"+mode+"'")
-
 
 
 def make_report(input_var, target_var, wave_form, loss_log, outfile=None,
