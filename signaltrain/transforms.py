@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 __author__ = 'S. Venkataramani, S.I. Mimilakis'
 __copyright__ = 'ECE Illinois, MacSeNet'
