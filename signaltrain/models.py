@@ -79,6 +79,8 @@ class SpecShrinkGrow_catri_skipadd(nn.Module):
         real, imag = self.encoder(y)
         ricat_s   = torch.cat((real, imag), 2)           # 'cat' real & imag together; _s saves value for a skip later
         ricat  = self.act( self.shrink(ricat_s) )        # _s2 for other skip connection  skips=1
+        ### L1 regularization goes here
+        reg_term = torch.mean(torch.norm(ricat, 1, dim=-1))
         ricat  = self.act( self.shrink2(ricat) )
 
         # ----- here is the 'middle of the hourglass';  from here we expand
@@ -98,10 +100,11 @@ class SpecShrinkGrow_catri_skipadd(nn.Module):
             y += y_s
         y = self.back_grow(y)
         if (4 in skips):  # for final skip we simply add (WaveNet does this). cat is too memory-intensive for large audio clips
-            y += input_var
+            y *= input_var # Let us try it at the output
+            #y += input_var
 
         layers = []# (ricat)     # additional container to report intermediary activations & more
-        return y, layers
+        return y, layers, reg_term
 
 
 
