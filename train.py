@@ -32,6 +32,8 @@ def train_model(model, optimizer, criterion, lambdas, train_gen, val_gen, cmd_ar
     """
     Main training routine
     """
+    # Regularization term
+    lambda_reg = 0.5
 
     # arguments from the command line
     (batch_size, max_epochs, effect, sig_length) = (cmd_args.batch,cmd_args.epochs,cmd_args.effect,cmd_args.length)
@@ -71,9 +73,9 @@ def train_model(model, optimizer, criterion, lambdas, train_gen, val_gen, cmd_ar
             Y_batch = Y_train[:,bgn:end,:].to(device)     # target output
 
             # Predict output, calc loss, show progress bar
-            Y_pred, layers = model(X_batch)               # predict the output
+            Y_pred, layers, reg_term = model(X_batch)               # predict the output
             loss = calc_loss(Y_pred, Y_batch, criterion)
-            epoch_loss += loss.item()
+            epoch_loss += loss.item() + lambda_reg * reg_term
             X_batch, Y_batch, Y_pred = X_batch.cpu(), Y_batch.cpu(), Y_pred.cpu()  # Move back to CPU (free up VRAM)
             st.utils.progbar(epoch, max_epochs, batch_num, n_batches, epoch_loss/(batch_num+1))  # show a progress bar through the epoch
 
