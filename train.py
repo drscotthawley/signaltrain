@@ -75,7 +75,7 @@ def train_model(model, optimizer, criterion, lambdas, train_gen, val_gen, cmd_ar
             # Predict output, calc loss, show progress bar
             Y_pred, layers, reg_term = model(X_batch)               # predict the output
             loss = calc_loss(Y_pred, Y_batch, criterion)
-            epoch_loss += loss.item() + lambda_reg * reg_term
+            epoch_loss += loss.item() + lambda_reg * reg_term.item()
             X_batch, Y_batch, Y_pred = X_batch.cpu(), Y_batch.cpu(), Y_pred.cpu()  # Move back to CPU (free up VRAM)
             st.utils.progbar(epoch, max_epochs, batch_num, n_batches, epoch_loss/(batch_num+1))  # show a progress bar through the epoch
 
@@ -98,9 +98,9 @@ def train_model(model, optimizer, criterion, lambdas, train_gen, val_gen, cmd_ar
                     bgn, end = batch_num*batch_size, min( (batch_num+1)*batch_size, X_val.size()[1])
                     X_batch = X_val[:,bgn:end,:].to(device)     # input signal,
                     Y_batch = Y_val[:,bgn:end,:].to(device)     # target output
-                    Ypred_val_batch, layers_pred = model(X_batch)
+                    Ypred_val_batch, layers_pred, reg_term = model(X_batch)
                     vloss = calc_loss(Ypred_val_batch, Y_batch, criterion)
-                    epoch_vloss += vloss.item()
+                    epoch_vloss += vloss.item() + lambda_reg * reg_term.item()
                     Ypred_val[:,bgn:end,:] = Ypred_val_batch.detach().cpu()  # save the prediction for plotting later
                     #X_val, Y_val, Ypred_val = X_val.cpu(), Y_val.cpu(), Ypred_val.cpu()  # free up VRAM on the GPU
                 epoch_vloss /= n_batches
@@ -180,7 +180,7 @@ def main():
     fs = args.fs
     lambdas = [float(x) for x in args.lambdas.split(',')] # turn comma-separated string into list of floats
     args.lr = args.lr / args.batch                        # found this to be necessary
-    
+
     st.utils.print_choochoo()   # display program info
 
     #------------------------------
