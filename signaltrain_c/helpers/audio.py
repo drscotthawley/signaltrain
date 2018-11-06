@@ -7,9 +7,9 @@ import numpy as np
 import scipy.signal as signal
 
 def random_ends(size=1): # probabilty dist. that emphasizes boundaries
-    return np.random.beta(0.85,0.85,size=size)
+    return np.random.beta(0.8,0.8,size=size)
 
-def synth_input_sample(t, chooser=None, randfunc=random_ends):
+def synth_input_sample(t, chooser=None, randfunc=np.random.rand):
     """
     Synthesizes various 'fake' audio wave forms -- synthetic data
     """
@@ -18,16 +18,17 @@ def synth_input_sample(t, chooser=None, randfunc=random_ends):
         chooser = np.random.randint(0, 7)
 
     if 0 == chooser:                     # sin, with random phase, amp & freq
-        amp = 0.4+0.6*randfunc()
-        freq = 40+150*randfunc()
+        amp = 0.5+0.5*randfunc()
+        freq = 20+60*randfunc()
         t0 = randfunc() * t[-1]
         x = amp*np.cos(freq*(t-t0))
         return x
 
-    elif 1 == chooser:                # fixed sine wave
-        freq = 5+150*randfunc()
+    elif 1 == chooser:                # fixed sine wave, random sign
         amp = 0.4+0.6*randfunc()
-        return amp*np.sin(freq*t)
+        freq = 10+50*randfunc()
+        sign = 1 #np.random.choice([-1,1])
+        return sign*amp*np.sin(freq*t)
 
     elif 2 == chooser:                    #  "pluck"
         amp0 = (0.6 * randfunc() + 0.4) * np.random.choice([-1, 1])
@@ -42,17 +43,17 @@ def synth_input_sample(t, chooser=None, randfunc=random_ends):
     elif 3 == chooser:                   # ramp up then down
         height = (0.4 * randfunc() + 0.2) * np.random.choice([-1,1])
         width = 0.3 * randfunc()/4 * t[-1]     # half-width actually
-        t0 = 2*width + 0.4 * randfunc() # make sure it fits
+        t0 = 2*width + 0.4 * randfunc()*t[-1] # make sure it fits
         x = height * (1 - np.abs(t-t0)/width)
         x[np.where(t < (t0-width))] = 0
         x[np.where(t > (t0+width))] = 0
         return x
 
-    elif (4 == chooser):                # 'noisy box'
+    elif (4 == chooser):                # 'box'
         height_low = 0.3*randfunc()+0.1
         height_high = 0.7 + 0.3*randfunc()
         t_up = randfunc()/3 * t[-1]               # time where volume jumps up
-        t_dn = t_up + 0.7*randfunc()* t[-1]    # time for jumping back down
+        t_dn = t_up + (0.2+0.6*randfunc())* t[-1]    # time for jumping back down
         t_mid = 0.5*(t_up+t_dn)
         #x = 2*np.random.random(t.shape[0]).astype(t.dtype)-1  # noise of unit amplitude
         x = 2*np.ones(t.shape[0]).astype(t.dtype)-1  # noise of unit amplitude

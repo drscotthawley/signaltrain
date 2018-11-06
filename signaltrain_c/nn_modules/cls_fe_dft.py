@@ -27,7 +27,6 @@ class Analysis(nn.Module):
         # Analysis 1D CNN
         self.conv_analysis_real = nn.Conv1d(1, self.sz, self.sz,
                                             padding=self.sz, stride=self.hop, bias=False)
-
         self.conv_analysis_imag = nn.Conv1d(1, self.sz, self.sz,
                                             padding=self.sz, stride=self.hop, bias=False)
 
