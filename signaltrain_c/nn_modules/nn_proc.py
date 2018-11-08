@@ -19,28 +19,28 @@ class AutoEncoder(nn.Module):
 
         # Analysis
         self.fnn_enc = nn.Linear(self._T, self._R, bias=True)
-        self.fnn_mid = nn.Linear(self._R + self._K, self._R, bias=True)
+        self.fnn_addknobs = nn.Linear(self._R + self._K, self._R, bias=True)
         self.fnn_dec = nn.Linear(self._R, self._T, bias=True)
 
         # Activation functions
-        #self.relu = nn.LeakyReLU()
-        #self.relu = nn.LeakyReLU()
+        self.relu = nn.LeakyReLU()
 
         self.initialize()
 
     def initialize(self):
         torch.nn.init.xavier_normal_(self.fnn_enc.weight)
-        torch.nn.init.xavier_normal_(self.fnn_mid.weight)
+        torch.nn.init.xavier_normal_(self.fnn_addknobs.weight)
         torch.nn.init.xavier_normal_(self.fnn_dec.weight)
         self.fnn_enc.bias.data.zero_()
-        self.fnn_mid.bias.data.zero_()
+        self.fnn_addknobs.bias.data.zero_()
         self.fnn_dec.bias.data.zero_()
 
     def forward(self, x_input, knobs, skip_connections='res'):
         x_input = x_input.transpose(2, 1)
         z = self.relu(self.fnn_enc(x_input))
         knobs_r = knobs.repeat( z.size()[1], 1).unsqueeze(0) # repeat the knobs to make dimensions match
-        z = self.relu( self.fnn_mid( torch.cat((z,knobs_r),2) ) )
+        #knobs_r = knobs.unsqueeze(1).repeat(1, z.size()[1], 1)  # repeat the knobs to make dimensions match
+        z = self.relu( self.fnn_addknobs( torch.cat((z,knobs_r),2) ) )
 
         if skip_connections == 'exp':           # Refering to an old AES paper for exponentiation
             z_a = torch.log(self.relu(self.fnn_dec(z)) + 1e-6) * torch.log(x_input + 1e-6)
