@@ -38,8 +38,7 @@ class AutoEncoder(nn.Module):
     def forward(self, x_input, knobs, skip_connections='res'):
         x_input = x_input.transpose(2, 1)
         z = self.relu(self.fnn_enc(x_input))
-        knobs_r = knobs.repeat( z.size()[1], 1).unsqueeze(0) # repeat the knobs to make dimensions match
-        #knobs_r = knobs.unsqueeze(1).repeat(1, z.size()[1], 1)  # repeat the knobs to make dimensions match
+        knobs_r = knobs.unsqueeze(1).repeat(1, z.size()[1], 1)  # repeat the knobs to make dimensions match
         z = self.relu( self.fnn_addknobs( torch.cat((z,knobs_r),2) ) )
 
         if skip_connections == 'exp':           # Refering to an old AES paper for exponentiation
@@ -52,6 +51,7 @@ class AutoEncoder(nn.Module):
         else:
             out = self.relu(self.fnn_dec(z))
 
-        return out.transpose(2, 1)
+        result = out.transpose(2, 1)
+        return result
 
 # EOF
