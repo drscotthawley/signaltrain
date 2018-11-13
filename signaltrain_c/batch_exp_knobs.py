@@ -15,49 +15,10 @@ from losses import loss_functions
 from subprocess import call, PIPE
 import torch.nn as nn
 
-class MPAEC(nn.Module):  # mag-phase autoencoder
-    """
-        Class for building the analysis part
-        of the Front-End ('Fe').
-    """
-    def __init__(self, expected_time_frames, ft_size=1024, hop_size=384, decomposition_rank=25):
-        super(MPAEC, self).__init__()
-        self.dft_analysis = cls_fe_dft.Analysis(ft_size=ft_size, hop_size=hop_size)
-        self.dft_synthesis = cls_fe_dft.Synthesis(ft_size=ft_size, hop_size=hop_size)
-        self.aenc = nn_proc.AutoEncoder(expected_time_frames, decomposition_rank)
-        self.phs_aenc = nn_proc.AutoEncoder(expected_time_frames, 2)
-
-
-    def clip_grad_norm_(self):
-        torch.nn.utils.clip_grad_norm_(list(self.dft_analysis.parameters()) +
-                                      list(self.dft_synthesis.parameters()),
-                                      max_norm=1., norm_type=1)
-
-    def forward(self, x_cuda, knobs_cuda):
-        # trainable STFT, outputs spectrograms for real & imag parts
-        x_real, x_imag = self.dft_analysis.forward(x_cuda)
-        # Magnitude-Phase computation
-        mag = torch.norm(torch.cat((x_real.unsqueeze(0), x_imag.unsqueeze(0)), 0), 2, dim=0)
-        phs = torch.atan2(x_imag, x_real+1e-6)
-
-        # Processes Magnitude and phase individually
-        mag_hat = self.aenc.forward(mag, knobs_cuda, skip_connections='sf')
-        phs_hat = self.phs_aenc.forward(phs, knobs_cuda, skip_connections=False) + phs # <-- Slightly smoother convergence
-
-        # Back to Real and Imaginary
-        an_real = mag_hat * torch.cos(phs_hat)
-        an_imag = mag_hat * torch.sin(phs_hat)
-
-        # Forward synthesis pass
-        x_hat = self.dft_synthesis.forward(an_real, an_imag)
-
-        #x_hat += x_cuda   # No residual connection here -- makes it worse
-
-        return x_hat, mag, mag_hat
 
 def calc_loss(x_hat,y_cuda,mag,objective,batch_size=20):
         # Reconstruction term plus regularization -> Slightly less wiggly waveform
-        loss = objective(x_hat, y_cuda) + 4e-4*mag.norm(1)#/mag.nelement()
+        loss = objective(x_hat, y_cuda) + 1e-5*mag.norm(1)#/mag.nelement()
         return loss/batch_size
 
 
@@ -75,7 +36,7 @@ class DataGenerator():
         self.y = np.zeros((batch_size,time_series_length),dtype=np.float32)
         self.knobs = np.zeros((batch_size,len(knob_ranges)),dtype=np.float32)
 
-    def gen_single(self,chooser,knobs,recyc_x=None):
+    def gen_single(self, chooser=None, knobs=None, recyc_x=None):
         "create a single time-series"
         if chooser is None:
             chooser = np.random.choice([0,1,2,4,6,7])
@@ -112,6 +73,12 @@ class DataGenerator():
         knobs_cuda =  torch.autograd.Variable(torch.from_numpy(self.knobs).to(device), requires_grad=self.requires_grad).float()
         return x_cuda, y_cuda, knobs_cuda
 
+    def new_batch_size(self, batch_size):
+        self.batch_size = batch_size
+        self.x = np.zeros((batch_size,self.time_series_length),dtype=np.float32)
+        self.y = np.zeros((batch_size,self.time_series_length),dtype=np.float32)
+        self.knobs = np.zeros((batch_size,len(self.knob_ranges)),dtype=np.float32)
+
 
 def savefig(*args, **kwargs):  # little helper to close figures
     plt.savefig(*args, **kwargs)
@@ -125,7 +92,7 @@ def plot_valdata(x_val_cuda, knobs_val_cuda, y_val_cuda, x_val_hat, knob_ranges,
     threshold, ratio, attack = knobs_w[0,0], knobs_w[0,1],knobs_w[0,2]
     plt.title(f'Validation Data, epoch {epoch}, loss_val = {loss_val.item():.2f}'+ \
         f'\nthreshold = {threshold:.2f}, ratio = {ratio:.2f}, attack = {attack:.2f}' )
-    plt.plot(x_val_cuda.data.cpu().numpy()[0, :], 'b', label='Original')
+    plt.plot(x_val_cuda.data.cpu().numpy()[0, :], 'b', label='Input')
     plt.plot(y_val_cuda.data.cpu().numpy()[0, :], 'r', label='Target')
     plt.plot(x_val_hat.data.cpu().numpy()[0, :], c=(0,0.5,0,0.75), label='Predicted')
     plt.ylim(-1,1)
@@ -145,29 +112,33 @@ def main_compressor(epochs=100, n_data_points=1, batch_size=20, device=torch.dev
     ratio = 3
     attack = 4096 // shrink_factor
     knob_means = np.array([threshold, ratio, attack])'''
-    knob_ranges = np.array([[-30,0], [1,5], [10,800]]) # threshold, ratio, attack_release
+    knob_ranges = np.array([[-30,0], [1,5], [10,2048]]) # threshold, ratio, attack_release
 
     #attack = 0.3 / shrink_factor
     # Analysis parameters
     ft_size = 1024 // shrink_factor
     hop_size = 384 // shrink_factor
     expected_time_frames = int(np.ceil(time_series_length/float(hop_size)) + np.ceil(ft_size/float(hop_size)))
-    decomposition_rank = 25
 
     # Initialize nn modules
-    model = MPAEC(expected_time_frames, ft_size=ft_size, hop_size=hop_size, decomposition_rank=decomposition_rank)
+    model = nn_proc.MPAEC(expected_time_frames, ft_size=ft_size, hop_size=hop_size)
     model.to(device)
 
     # learning rate modification for sgd & 1cycle learning
     n_batches = n_data_points // batch_size
-    min_lr, max_lr = 5e-6, 1.5e-3
+    lr_min, lr_max = 2e-7, 1e-3
+    lr_start = 1e-6
+    lrsched_epochs = epochs//2.2    # timescale for sections of learning cycle
+    lrsched_mult = 0.5
+    lr_slope = (lr_max - lr_start)/(lrsched_epochs)
+
     # Initialize optimizer
-    lr = max_lr
+    lr = lr_start
     optimizer = torch.optim.Adam(list(model.parameters()), lr=lr)
 
 
     # objective for loss functions
-    objective = loss_functions.logcosh
+    objective = loss_functions.logcosh #mae
 
     # setup log file
     logfilename = "vl_avg_out.dat"
@@ -224,15 +195,26 @@ def main_compressor(epochs=100, n_data_points=1, batch_size=20, device=torch.dev
         # save model to file
         if ((epoch+1) % 10 == 0):
             checkpointname = 'modelcheckpoint.tar'
-            print(f'saving model to {checkpointname}')
+            print(f'saving model to {checkpointname}',end="")
             state = {'epoch': epoch + 1, 'state_dict': model.state_dict(),
                 'optimizer': optimizer.state_dict()}
             torch.save(state, checkpointname)
 
         # learning rate schedule
-        if ((epoch+1) % 50 == 0):
-            lr = max( min_lr, lr*0.7)
-            optimizer.param_groups[0]['lr'] = lr
+        #if ((epoch+1) % lrsched_epochs == 0):
+        #    lr = max( min_lr, lr*lrsched_mult)
+        # 1cycle policy  @sgugger, https://sgugger.github.io/the-1cycle-policy.html
+        if ((epoch) == lrsched_epochs):  # after one half-cycle, make it go back down
+            lr_slope *= -1
+        if ((epoch) % (2*lrsched_epochs) == 0) and ((epoch) >= 2*lrsched_epochs): # after one full cycle, shrink it every half cycle (and keep going down)
+            lr *= 0.8
+            lr_slope = -0.01*lr
+            #n_data_points = min(2*n_data_points, 4000*64)
+            #batch_size = min(2*batch_size, 20*64)
+            #datagen.new_batch_size(batch_size)
+
+        lr = max(lr_min, lr + lr_slope)
+        optimizer.param_groups[0]['lr'] = lr
 
 
         if ((epoch+1) % 50 == 0) or (epoch == epochs-1):
@@ -260,7 +242,7 @@ def main_compressor(epochs=100, n_data_points=1, batch_size=20, device=torch.dev
             plt.title('Conv-Synthesis Imag')
             savefig('conv_synth_imag.png')
             #plt.show(block=True)
-
+            '''
             print("\n\nMaking movies")
             for sig_type in [0,4]:
                 print()
@@ -284,6 +266,7 @@ def main_compressor(epochs=100, n_data_points=1, batch_size=20, device=torch.dev
                 p = call(shellcmd, stdout=PIPE, shell=True)
 
             x_val_cuda2, y_val_cuda2, knobs_val_cuda2 = x_val_cuda, y_val_cuda, knobs_val_cuda
+            '''
     return None
 
 

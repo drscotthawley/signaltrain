@@ -116,7 +116,7 @@ def compressor(x, thresh=-24, ratio=2, attack=2048, dtype=np.float32):
     out_env = np.copy(in_env)              # output envelope
     i = np.where(in_env >  thresh)          # compress where input env exceeds thresh
     out_env[i] = thresh + (in_env[i]-thresh)/ratio
-    gain = np.power(10.0,(out_env-in_env)/10)
+    gain = np.power(10.0,(out_env-in_env)/20)
     y = (x * gain).astype(dtype)
     return y
 
