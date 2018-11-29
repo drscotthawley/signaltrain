@@ -7,6 +7,4 @@ __copyright__ = 'MacSeNet'
 
 
 
-
-
 # EOF

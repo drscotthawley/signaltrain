@@ -7,6 +7,9 @@ import numpy as np
 import wave as _wave
 from scipy.io.wavfile import write, read
 from sys import platform
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pylab as plt
 
 class AudioIO:
 	""" Class for handling audio input/output operations.
@@ -392,6 +395,65 @@ class AudioIO:
 		return None
 
 
+# functions added by SHH:
+
+def makemovie(datagen, model, batch_size):
+    print("\n\nMaking movies")
+    for sig_type in [0,4]:
+        print()
+        x_val_cuda2, y_val_cuda2, knobs_val_cuda2 = datagen_movie.new(chooser=sig_type)
+        frame = 0
+        intervals = 7
+        for t in np.linspace(-0.5,0.5,intervals):          # threshold
+            for r in np.linspace(-0.5,0.5,intervals):      # ratio
+                for a in np.linspace(-0.5,0.5,intervals):  # attack
+                    frame += 1
+                    print(f'\rframe = {frame}/{intervals**3-1}.   ',end="")
+                    knobs = np.array([t, r, a])
+                    x_val_cuda2, y_val_cuda2, knobs_val_cuda2 = datagen_movie.new(knobs=knobs, recyc_x=True, chooser=sig_type)
+                    x_val_hat2, mag_val2, mag_val_hat2 = model.forward(x_val_cuda2, knobs_val_cuda2)
+                    loss_val2 = calc_loss(x_val_hat2,y_val_cuda2,mag_val2,objective,batch_size=batch_size)
+
+                    framename = f'movie{sig_type}_{frame:04}.png'
+                    print(f'Saving {framename}           ',end="")
+                    plot_valdata(x_val_cuda2, knobs_val_cuda2, y_val_cuda2, x_val_hat2, knob_ranges, epoch, loss_val, filename=framename)
+        shellcmd = f'rm -f movie{sig_type}.mp4; ffmpeg -framerate 10 -i movie{sig_type}_%04d.png -c:v libx264 -vf format=yuv420p movie{sig_type}.mp4; rm -f movie{sig_type}_*.png'
+        p = call(shellcmd, stdout=PIPE, shell=True)
+    return
+
+
+def savefig(*args, **kwargs):  # little helper to close figures
+    plt.savefig(*args, **kwargs)
+    plt.close(plt.gcf())       # without this you eventually get 'too many figures open' message
+
+
+def plot_valdata(x_val_cuda, knobs_val_cuda, y_val_cuda, x_val_hat, effect, epoch, loss_val, filename='val_data.png'):
+    plt.figure(7,figsize=(6,8))
+    knobs_w = effect.knobs_wc( knobs_val_cuda.data.cpu().numpy()[0,:] )
+    titlestr = f'{effect.name} val data, epoch {epoch}, loss_val = {loss_val.item():.3e}\n'
+    for i in range(len(effect.knob_names)):
+        titlestr += f'{effect.knob_names[i]} = {knobs_w[i]:.2f}'
+        if i < len(effect.knob_names)-1: titlestr += ', '
+    plt.suptitle(titlestr)
+    plt.subplot(3, 1, 1)
+    plt.plot(x_val_cuda.data.cpu().numpy()[0, :], 'b', label='Input')
+    plt.ylim(-1,1)
+    plt.legend()
+    plt.subplot(3, 1, 2)
+    plt.plot(y_val_cuda.data.cpu().numpy()[0, :], 'r', label='Target')
+    plt.ylim(-1,1)
+    plt.legend()
+    plt.subplot(3, 1, 3)
+    plt.plot(y_val_cuda.data.cpu().numpy()[0, :], 'r', label='Target')
+    plt.plot(x_val_hat.data.cpu().numpy()[0, :], c=(0,0.5,0,0.85), label='Predicted')
+    plt.ylim(-1,1)
+    plt.legend()
+    savefig(filename)
+
+
+
+
+
 if __name__ == "__main__":
 	# Define File
 	myReadFile = 'EnterYourWavFile.wav'
@@ -417,29 +479,3 @@ if __name__ == "__main__":
 	# Listen to stereo processed
 	AudioIO.sound(x2*g,fs)
 	AudioIO.audioWrite(x2, fs, 16, 'myNewWavFile.wav', 'wav')
-
-
-
-def makemovie(datagen, model, batch_size):
-    print("\n\nMaking movies")
-    for sig_type in [0,4]:
-        print()
-        x_val_cuda2, y_val_cuda2, knobs_val_cuda2 = datagen_movie.new(chooser=sig_type)
-        frame = 0
-        intervals = 7
-        for t in np.linspace(-0.5,0.5,intervals):          # threshold
-            for r in np.linspace(-0.5,0.5,intervals):      # ratio
-                for a in np.linspace(-0.5,0.5,intervals):  # attack
-                    frame += 1
-                    print(f'\rframe = {frame}/{intervals**3-1}.   ',end="")
-                    knobs = np.array([t, r, a])
-                    x_val_cuda2, y_val_cuda2, knobs_val_cuda2 = datagen_movie.new(knobs=knobs, recyc_x=True, chooser=sig_type)
-                    x_val_hat2, mag_val2, mag_val_hat2 = model.forward(x_val_cuda2, knobs_val_cuda2)
-                    loss_val2 = calc_loss(x_val_hat2,y_val_cuda2,mag_val2,objective,batch_size=batch_size)
-
-                    framename = f'movie{sig_type}_{frame:04}.png'
-                    print(f'Saving {framename}           ',end="")
-                    plot_valdata(x_val_cuda2, knobs_val_cuda2, y_val_cuda2, x_val_hat2, knob_ranges, epoch, loss_val, filename=framename)
-        shellcmd = f'rm -f movie{sig_type}.mp4; ffmpeg -framerate 10 -i movie{sig_type}_%04d.png -c:v libx264 -vf format=yuv420p movie{sig_type}.mp4; rm -f movie{sig_type}_*.png'
-        p = call(shellcmd, stdout=PIPE, shell=True)
-    return

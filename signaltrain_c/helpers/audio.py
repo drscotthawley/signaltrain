@@ -6,12 +6,15 @@ import numpy as np
 import scipy.signal as signal
 import torch
 import librosa
+from numba import autojit   # Note: nopython version gives symbol errors when used w/ Jupyter Notebook, so using autojit instead
+import os
 
 def random_ends(size=1): # probabilty dist. that emphasizes boundaries
     return np.random.beta(0.8,0.8,size=size)
 
 def sliding_window(x, size, overlap=0):
     """
+    Stacks 1D array into a series of sliding windows with a certain amount of overlap
     This is fast because it generates a "view" rather than creating a new array.
        overlap = amount of "lookback", when predicting the next set of values
     Example:
@@ -95,7 +98,44 @@ def triangle(t, randfunc=np.random.rand, t0_fac=None): # ramp up then down
     x[np.where(t > (t0+width))] = 0
     amp_n = (0.1*randfunc()+0.02)   # add noise
     return x + amp_n*(2*np.random.random(t.shape[0])-1)
-#---- End list of test signals
+
+
+def read_audio_file(filename, sr=44100):
+    signal, sr = librosa.load(filename, sr=sr, mono=True) # convert to mono
+    return signal, sr
+
+def readaudio_generator(seconds=2,  path=os.path.expanduser('~')+'/datasets/signaltrain/Val', sr=44100,
+    random_every=True):
+    """
+    reads audio from any number of audio files sitting in directory 'path'
+    supplies a window of length "seconds". If random_every=True, this window will be randomly chosen
+    """
+    # seq_size = amount of audio samples to supply from file
+    # basepath = directory containing Train, Val, and Test directories
+    # path = audio files for dataset  (can be Train, Val or test)
+    # random_every = get a random window every time next is called, or step sequentially through file
+    files = os.listdir(path)
+    seq_size = seconds * sr
+    read_new_file = True
+    start = -seq_size
+    while True:
+        if read_new_file:
+            filename = path+'/'+np.random.choice(files)  # pick a random audio file in the directory
+            #print("Reading new data from "+filename+" ")
+            data, sr = read_audio_file(filename, sr=sr)
+            read_new_file=False   # don't keep switching files  everytime generator is called
+
+
+        if (random_every): # grab a random window of the signal
+            start = np.random.randint(0,data.shape[0]-seq_size)
+        else:
+            start += seq_size
+        xraw = data[start:start+seq_size]   # the newaxis just gives us a [1,] on front
+        # Note: any 'windowing' happens after the effects are applied, later
+        rc = ( yield xraw )         # rc is set by generator's send() method.  YIELD here is the output
+        if isinstance(rc, bool):    # can set read_new by calling send(True)
+            read_new_file = rc
+
 
 def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
     """
@@ -126,7 +166,10 @@ def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
         return amp_n*(2*np.random.rand(t.shape[0])-1)
     else:
         return 0.5*(synth_input_sample(t)+synth_input_sample(t)) # superposition of the above
+#---- End test signals
 
+
+#---- Effects
 
 def compressor(x, thresh=-24, ratio=2, attack=2048, dtype=np.float32):
     """
@@ -151,65 +194,6 @@ def compressor(x, thresh=-24, ratio=2, attack=2048, dtype=np.float32):
     return y
 
 
-# code from Eric Tarr
-def compressor_new_slow(x,Fs=44100,thresh=-24.0, ratio=2.0, attackTime=0.01,releaseTime=0.01, dtype=np.float32):
-    """
-    The loop makes this really slow.
-    Inputs:
-      x: input signal
-      Fs: sample rate in Hz
-      thresh: threhold in dB
-      ratio: ratio (ratio:1)
-      attackTime, releasTime: in seconds
-      dtype: typical numpy datatype
-    """
-    N = len(x)
-    y = np.zeros(N, dtype=dtype)
-    lin_A = np.zeros(N, dtype=dtype)
-
-    # Initialize separate attack and release times
-    alphaA = np.exp(-np.log(9)/(Fs * attackTime)).astype(dtype)
-    alphaR = np.exp(-np.log(9)/(Fs * releaseTime)).astype(dtype)
-
-    gainSmoothPrev = 0 # Initialize smoothing variable
-
-    # Loop over each sample to see if it is above thresh
-    for n in range(N):
-        # Turn the input signal into a uni-polar signal on the dB scale
-        x_uni = np.abs(x[n]).astype(dtype)
-        x_dB = 20*np.log10(x_uni + 1e-8).astype(dtype)
-        # Ensure there are no values of negative infinity
-        if x_dB < -96:
-            x_dB = -96
-
-        # Static Characteristics
-        if x_dB > thresh:
-            gainSC = thresh + (x_dB - thresh)/ratio # Perform Downwards Compression
-        else:
-            gainSC = x_dB # Do not perform compression
-
-        gainChange_dB = gainSC - x_dB
-
-        # smooth over the gainChange
-        if gainChange_dB < gainSmoothPrev:
-            # attack mode
-            gainSmooth = ((1-alphaA)*gainChange_dB) +(alphaA*gainSmoothPrev)
-        else:
-            # release
-            gainSmooth = ((1-alphaR)*gainChange_dB) +(alphaR*gainSmoothPrev)
-
-        # Convert to linear amplitude scalar
-        lin_A[n] = np.power(10.0,(gainSmooth/20)).astype(dtype)
-
-        # Apply linear amplitude to input sample
-        y[n] = lin_A[n] * x[n]
-
-        # Update gainSmoothPrev used in the next sample of the loop
-        gainSmoothPrev = gainSmooth
-
-    return y.astype(dtype)
-
-from numba import autojit
 @autojit
 def compressor_new_fast(x, thresh=-24.0, ratio=2.0, attackTime=0.01,releaseTime=0.01, Fs=44100.0, dtype=np.float32):
     """
@@ -224,7 +208,7 @@ def compressor_new_fast(x, thresh=-24.0, ratio=2.0, attackTime=0.01,releaseTime=
     """
     N = len(x)
     y = np.zeros(N, dtype=dtype)
-    lin_A = np.zeros(N, dtype=dtype)
+    lin_A = np.zeros(N, dtype=dtype)  # functions as gain
 
     # Initialize separate attack and release times
     alphaA = np.exp(-np.log(9)/(Fs * attackTime))#.astype(dtype)
@@ -241,15 +225,14 @@ def compressor_new_fast(x, thresh=-24.0, ratio=2.0, attackTime=0.01,releaseTime=
     i = np.where(x_dB > thresh)
     gainChange_dB[i] =  thresh + (x_dB[i] - thresh)/ratio - x_dB[i] # Perform Downwards Compression
 
-    for n in range(x_dB.shape[0]):
-
+    for n in range(x_dB.shape[0]):   # this loop is slow but unavoidable if alphaA != alphaR. @autojit makes it fast.
         # smooth over the gainChange
         if gainChange_dB[n] < lin_A[n-1]:
             lin_A[n] = ((1-alphaA)*gainChange_dB[n]) +(alphaA*lin_A[n-1]) # attack mode
         else:
             lin_A[n] = ((1-alphaR)*gainChange_dB[n]) +(alphaR*lin_A[n-1]) # release
 
-    lin_A = np.power(10.0,(lin_A/20)).astype(dtype)  # Convert to linear amplitude scalar
+    lin_A = np.power(10.0,(lin_A/20)).astype(dtype)  # Convert to linear amplitude scalar; i.e. map from dB to amplitude
     y = lin_A * x    # Apply linear amplitude to input sample
 
     return y.astype(dtype)
@@ -275,7 +258,7 @@ def echo(x, delay_samples=1487, ratio=0.6, echoes=1, dtype=np.float32):
 
 # Classes for Effects
 class Effect():
-    """Generic effect, in this case siple gain
+    """Generic effect, in this case simple gain
        sub-classed Effects should also define a 'go' method to execute the effect
     """
     def __init__(self, sr=44100):
@@ -283,8 +266,18 @@ class Effect():
         self.knob_names = ['knob']
         self.knob_ranges = np.array([[0,1]])  # min,max world coordinate values for "all the way counterclockwise" and "all the way clockwise"
         self.sr = sr
-    def knobs_wc(self, knobs):   # convert knob vals from [-.5,.5] to "world coordinates" used by functions
-        return self.knob_ranges[:,0] + (knobs+0.5)*(self.knob_ranges[:,1]-self.knob_ranges[:,0])
+
+    def knobs_wc(self, knobs_nn):   # convert knob vals from [-.5,.5] to "world coordinates" used by effect functions
+        return (self.knob_ranges[:,0] + (knobs_nn+0.5)*(self.knob_ranges[:,1]-self.knob_ranges[:,0])).tolist()
+
+    def info(self):
+        assert len(self.knob_names)==len(self.knob_ranges)
+        print(f'Effect: {self.name}.  Knobs:')
+        for i in range(len(self.knob_names)):
+            print(f'                            {self.knob_names[i]}: {self.knob_ranges[i][0]} to {self.knob_ranges[i][1]}')
+    # Effects should also define a 'go' method which executes the effect, mapping input and knobs_nn to output y, x
+    #   We return x as well as y, because some effects may reverse x & y (e.g. denoiser)
+
 
 class Compressor(Effect):
     def __init__(self):
@@ -292,22 +285,19 @@ class Compressor(Effect):
         self.name = 'Compressor'
         self.knob_names = ['threshold', 'ratio', 'attackrelease']
         self.knob_ranges = np.array([[-30,0], [1,5], [10,2048]])
-
-    def go(self, x, knobs):
-        knobs_w = self.knobs_wc(knobs).tolist()
+    def go(self, x, knobs_nn):
+        knobs_w = self.knobs_wc(knobs_nn)
         return compressor(x, thresh=knobs_w[0], ratio=knobs_w[1], attack=knobs_w[2]), x
 
-class Compressor_new(Effect):
+class Compressor_4c(Effect):  # compressor with 4 controls
     def __init__(self):
-        super(Compressor_new, self).__init__()
-        self.name = 'Compressor_new'
+        super(Compressor_4c, self).__init__()
+        self.name = 'Compressor_4c'
         self.knob_names = ['thresh', 'ratio', 'attackTime','releaseTime']
         self.knob_ranges = np.array([[-30,0], [1,5], [1e-3,4e-2], [1e-3,4e-2]])
-
-    def go(self, x, knobs):
-        knobs_w = self.knobs_wc(knobs).tolist()
+    def go(self, x, knobs_nn):
+        knobs_w = self.knobs_wc(knobs_nn)
         return compressor_new_fast(x, thresh=knobs_w[0], ratio=knobs_w[1], attackTime=knobs_w[2], releaseTime=knobs_w[3]), x
-
 
 class Echo(Effect):
     def __init__(self):
@@ -317,20 +307,97 @@ class Echo(Effect):
         #self.knob_ranges = np.array([[100,1500], [0.1,0.9],[2,2]])
         self.knob_ranges = np.array([[400,400], [0.4,1.0],[2,2]])
         self.sr = sr
-
-    def go(self, x, knobs):
-        knobs_w = self.knobs_wc(knobs).tolist()
+    def go(self, x, knobs_nn):
+        knobs_w = self.knobs_wc(knobs_nn)
         return echo(x, delay_samples=int(np.round(knobs_w[0])), ratio=knobs_w[1], echoes=int(np.round(knobs_w[2]))), x
 
-class PitchShift(Effect):
+class PitchShifter(Effect):
     def __init__(self):
-        super(PitchShift, self).__init__()
-        self.name = 'Pitch Shift'
-        self.knob_names = ['n_steps','dum1','dum2']
-        self.knob_ranges = np.array([[-12,12],[0,0],[0,0]])
+        super(PitchShifter, self).__init__()
+        self.name = 'Pitch Shifter'
+        self.knob_names = ['n_steps']
+        self.knob_ranges = np.array([[-12,12]])  # number of 12-tone pitch steps by which to shift the signal
+    def go(self, x, knobs_nn):
+        knobs_w = self.knobs_wc(knobs_nn)
+        return librosa.effects.pitch_shift(x, sr=self.sr, n_steps=knobs_w[0]), x   # TODO: librosa's pitch_shift is SLOW!
 
-    def go(self, x, knobs):
-        knobs_w = self.knobs_wc(knobs).tolist()
-        return librosa.effects.pitch_shift(x, sr=self.sr, n_steps=knobs_w[0]), x
+class Denoise(Effect):  # add noise to x, swap x and y
+    """
+    This doesn't really denoise: It adds noise to the input, then swaps input & output.
+    So you wouldn't be able to input a noisy signal and have it get denoised.
+    But when the network trains on this, it learns to take noisy input and denoise it by a tunable amount 'strength'
+    """
+    def __init__(self):
+        super(Denoise, self).__init__()
+        self.name = 'Denoise'
+        self.knob_names = ['strength']
+        self.knob_ranges = np.array([[0.01,0.5]])
+    def go(self, x, knobs_nn):
+        knobs_w = self.knobs_wc(knobs_nn)
+        return x, x + knobs_w[0]*(2*np.random.random(x.shape[0])-1)   # swaps y & x: what was the input becomes the output
 
+# End of effects
+
+
+# Data Generator
+class AudioDataGenerator():
+    def __init__(self, time_series_length, sampling_freq, effect, batch_size=10, requires_grad=True, device=torch.device("cuda:0")):
+        super(AudioDataGenerator, self).__init__()
+        self.time_series_length = time_series_length
+        self.t = np.arange(time_series_length,dtype=np.float32) / sampling_freq
+        self.effect = effect
+        self.batch_size = batch_size
+        self.requires_grad = requires_grad
+        self.device = device
+
+        # preallocate memory
+        self.x = np.zeros((batch_size,time_series_length),dtype=np.float32)
+        self.y = np.zeros((batch_size,time_series_length),dtype=np.float32)
+        self.knobs = np.zeros((batch_size,len(self.effect.knob_ranges)),dtype=np.float32)
+
+    def gen_single(self, chooser=None, knobs=None, recyc_x=None):
+        """create a single time-series"""
+        if chooser is None:
+            chooser = np.random.choice([0,1,2,4,6,7])  # for compressor
+            #chooser = np.random.choice([1,3,5,6,7])  # for echo
+
+        if recyc_x is None:
+            x = synth_input_sample(self.t, chooser)
+        else:
+            x = recyc_x   # don't generate new x
+
+        if knobs is None:
+            knobs = random_ends(len(self.effect.knob_ranges))-0.5  # inputs to NN, zero-mean...except we emphasize the ends slightly
+
+        y, x = self.effect.go(x, knobs)
+
+        return x, y, knobs
+
+    def new(self,chooser=None, knobs=None, recyc_x=False):  # Generate new x, y, knobs  set
+        # was going to try parallel via multiprocessing but it's actually slower than serial
+        #self.pool = Pool(processes=10)
+        knobs = None #random_ends(len(self.effect.knob_ranges))-0.5  # same knobs for whole batch
+        for line in range(self.batch_size):
+            if recyc_x:
+                #self.x[line,:], self.y[line,:], self.knobs[line,:] = self.pool.apply_async(partial(self.gen_single, chooser, knobs, recyc_x=self.x[line,:])).get()
+                self.x[line,:], self.y[line,:], self.knobs[line,:] = self.gen_single(chooser, knobs=knobs, recyc_x=self.x[line,:])
+            else:
+                #self.x[line,:], self.y[line,:], self.knobs[line,:] = self.pool.apply_async(partial(self.gen_single,chooser,knobs)).get()
+                self.x[line,:], self.y[line,:], self.knobs[line,:] = self.gen_single(chooser, knobs=knobs)
+        #pool.close()
+
+        # Turn numpy data into torch/cuda data
+        x_torch = torch.autograd.Variable(torch.from_numpy(self.x).to(self.device), requires_grad=self.requires_grad).float()
+        y_torch = torch.autograd.Variable(torch.from_numpy(self.y).to(self.device), requires_grad=False).float()
+        knobs_torch =  torch.autograd.Variable(torch.from_numpy(self.knobs).to(self.device), requires_grad=self.requires_grad).float()
+        return x_torch, y_torch, knobs_torch
+
+    def new_batch_size(self, batch_size):
+        self.batch_size = batch_size
+        self.x = np.zeros((batch_size,self.time_series_length),dtype=np.float32)
+        self.y = np.zeros((batch_size,self.time_series_length),dtype=np.float32)
+        self.knobs = np.zeros((batch_size,len(self.effect.knob_ranges)),dtype=np.float32)
+
+if __name__ == "__main__":
+    pass
 # EOF

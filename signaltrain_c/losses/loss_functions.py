@@ -6,6 +6,13 @@ __copyright__ = 'MacSeNet'
 import torch
 
 
+#import torch.nn.functional as F
+def calc_loss(x_hat,y_cuda,mag,objective,batch_size=20):
+        # Reconstruction term plus regularization -> Slightly less wiggly waveform
+        loss = objective(x_hat, y_cuda) + 1e-5*mag.norm(1) #- 1e-3*F.conv1d(x_hat.unsqueeze(0),y_cuda.unsqueeze(0)).norm(1) # add negative correlation loss
+        return loss/batch_size
+
+
 def mse(x, x_hat):
     return torch.norm(torch.pow(x - x_hat, 2.))
 

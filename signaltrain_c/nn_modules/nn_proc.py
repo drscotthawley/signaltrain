@@ -186,6 +186,10 @@ class MPAEC(nn.Module):  # mag-phase autoencoder
         self.phs_aenc = AutoEncoder(expected_time_frames, decomposition_rank, K=n_knobs)
         #self.valve = nn.Parameter(torch.tensor([0.2,1.0]), requires_grad=True)  # "wet-dry mix"
 
+    def reinitialize(self):  # randomly reassigns weights
+        self.aenc.initialize()
+        self.phs_aenc.initialize()
+
     def clip_grad_norm_(self):
         torch.nn.utils.clip_grad_norm_(list(self.dft_analysis.parameters()) +
                                       list(self.dft_synthesis.parameters()),
@@ -214,17 +218,55 @@ class MPAEC(nn.Module):  # mag-phase autoencoder
 
         return 2*x_hat, 2*mag, 2*mag_hat   # undo the /2 at the beginning
 
-class Ensemble(nn.Module):  # mag-phase autoencoder
+
+class Ensemble(nn.Module):
     """
-        ensemble of MPAEC's
+    makes an ensemble of similar models from a 'seed' model
     """
-    def __init__(self, expected_time_frames, ft_size=1024, hop_size=384, decomposition_rank=64):
+    def __init__(self, model, N=4):#   N = number of 'copies' of model  expected_time_frames, ft_size=1024, hop_size=384, decomposition_rank=64):
         super(Ensemble, self).__init__()
-        self.model0 = MPAEC(expected_time_frames, ft_size=ft_size, hop_size=hop_size, decomposition_rank=decomposition_rank)
+        self.models = []
+        for i in range(N):
+            self.models.append(torch.copy.deepcopy(model))
+            self.models[i].reinitialize()
+        self.rel = nn.Parameter(torch.ones(N).mean(), requires_grad=True) # releative weights for ensemble outputs
+    
+    def forward(self, x_cuda, knobs_cuda):
+        i = 0
+        x_hat, mag, mag_hat = self.rel[i]*(self.models[i].forward(x_cuda, knobs_cuda))
+        for i in range(1,len(self.models)):
+            x_hati, magi, mag_hati = self.rel[i]*(self.models[i].forward(x_cuda, knobs_cuda))
+            x_hat, mag, mag_hat =  x_hat + x_hati,  mag + magi, mag_hat + mag_hati
+        return x_hat, mag, mag_hat
+
+    def clip_grad_norm_(self):
+        for i in range(len(self.models)):
+            self.models[i].clip_grad_norm()
+
+    def parameters(self):
+        params = []
+        for i in range(len(self.models)):
+            params += models[i].parameters()
+        return params
+
+    def backward(self):
+        for i in range(len(self.models)):
+            self.models[i].backward()
+
+
+
+class Ensemble_old(nn.Module):
+    """
+        ensemble of 4 MPAEC's
+    """
+    def __init__(self, model, N=4,  ft_size=1024, hop_size=384,  decomposition_rank=64, n_knobs=3):
+        #   N = number of 'copies' of model  expected_time_frames, ft_size=1024, hop_size=384, decomposition_rank=64):
+        super(Ensemble, self).__init__()
+        assert 4==N,"Yea, we should make this work for N != 4.  Putting model into a *list* of models breaks several things in PyTorch's autograd"
+        self.model0 = model
         self.model1 = MPAEC(expected_time_frames, ft_size=ft_size, hop_size=hop_size, decomposition_rank=decomposition_rank)
         self.model2 = MPAEC(expected_time_frames, ft_size=ft_size, hop_size=hop_size, decomposition_rank=decomposition_rank)
         self.model3 = MPAEC(expected_time_frames, ft_size=ft_size, hop_size=hop_size, decomposition_rank=decomposition_rank)
-        #self.rel = nn.Parameter(torch.tensor([.3,.4,.2,.1]), requires_grad=True) # weighted average of ensembles
         self.rel = nn.Parameter(torch.tensor([.25,.25,.25,.25]), requires_grad=True) # weighted average of ensembles
 
     def forward(self, x_cuda, knobs_cuda):
@@ -243,5 +285,6 @@ class Ensemble(nn.Module):  # mag-phase autoencoder
         self.model1.clip_grad_norm_()
         self.model2.clip_grad_norm_()
         self.model3.clip_grad_norm_()
+
 
 # EOF
