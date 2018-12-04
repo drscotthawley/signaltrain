@@ -45,18 +45,17 @@ def get_1cycle_schedule(lr_max = 1e-3, n_data_points = 8000, epochs = 200,
 
 
 
-def lrfind(model, datagen, objective, optimizer, batch_size, calc_loss, start=1e-6, stop=1e-2, num_lrs=150):
+def lrfind(model, datagen, optimizer, calc_loss, start=1e-6, stop=1e-2, num_lrs=150):
     """ Learning Rate finder.  See leslie howard, sylvian gugger & jeremy howard's work """
     print("Running LR Find:",end="",flush=True)
 
     lrs, losses = [], []
     for lr_try in np.logspace(np.log10(start), np.log10(stop), num_lrs):
         print(".",sep="",end="",flush=True)
-        #print(".",sep="",end="",flush=True)
         optimizer.param_groups[0]['lr'] = lr_try
         x_cuda, y_cuda, knobs_cuda = datagen.new()
         x_hat, mag, mag_hat = model.forward(x_cuda, knobs_cuda)
-        loss = calc_loss(x_hat,y_cuda,mag,objective,batch_size=batch_size)
+        loss = calc_loss(x_hat,y_cuda,mag)
         lrs.append(lr_try)
         losses.append(loss.item())
         optimizer.zero_grad()
@@ -109,9 +108,8 @@ if __name__ == "__main__":
     # Initialize nn modules
     model = nn_proc.MPAEC(expected_time_frames, ft_size=ft_size, hop_size=hop_size, n_knobs=len(effect.knob_names))
     optimizer = torch.optim.Adam(list(model.parameters()), lr=1e-3, weight_decay=0)
-    objective = loss_functions.logcosh #mae with curvy bottom
 
     datagen = audio.AudioDataGenerator(time_series_length, sampling_freq, effect, batch_size=batch_size, device=device)
 
-    lrfind(model, datagen, objective, optimizer, batch_size, loss_functions.calc_loss)
+    lrfind(model, datagen, optimizer, loss_functions.calc_loss)
 # EOF

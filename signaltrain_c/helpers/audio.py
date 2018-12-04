@@ -42,19 +42,22 @@ def undo_siding_window(x, overlap):
 
 
 #--- List of test signals:
-def randsine(t, randfunc=np.random.rand, amp_range=[0.5,0.9], freq_range=[5,55], t0_fac=None):
-    amp = amp_range[0] + (amp_range[1]-amp_range[0])*randfunc()
-    freq = freq_range[0] + (freq_range[1]-freq_range[0])*randfunc()
-    t0 = randfunc() * t[-1] if t0_fac is None else t0_fac*t[-1]
-    x = amp*np.cos(freq*(t-t0))
-    return x
+def randsine(t, randfunc=np.random.rand, amp_range=[0.2,0.9], freq_range=[5,150], n_tones=None, t0_fac=None):
+    y = np.zeros(t.shape[0])
+    if n_tones is None: n_tones=np.random.randint(1,3)
+    for i in range(n_tones):
+        amp = amp_range[0] + (amp_range[1]-amp_range[0])*randfunc()
+        freq = freq_range[0] + (freq_range[1]-freq_range[0])*randfunc()
+        t0 = randfunc() * t[-1] if t0_fac is None else t0_fac*t[-1]
+        y += amp*np.cos(freq*(t-t0))
+    return y
 
 def box(t, randfunc=np.random.rand, t0_fac=None):
     height_low, height_high = 0.3*randfunc()+0.1, 0.35*randfunc() + 0.6
     maxi = len(t)
     delta = 1+ maxi//100     # slope the sides slightly
     i_up = delta+int( 0.3*randfunc() * maxi) if t0_fac is None else int(t0_fac*maxi)
-    i_dn = i_up + int( (0.3+0.35*randfunc())*maxi)   # time for jumping back down
+    i_dn = min( i_up + int( (0.3+0.35*randfunc())*maxi), maxi-delta-1)   # time for jumping back down
     x = height_low*np.ones(t.shape[0]).astype(t.dtype)  # noise of unit amplitude
     x[i_up:i_dn] = height_high
     x[i_up-delta:i_up+delta] = height_low + (height_high-height_low)*(np.arange(2*delta))/2/delta
@@ -64,17 +67,20 @@ def box(t, randfunc=np.random.rand, t0_fac=None):
 def expdecay(t, randfunc=np.random.rand, t0_fac=None):
     t0 = 0.35*randfunc()*t[-1] if t0_fac is None else t0_fac*t[-1]
     height_low, height_high = 0.1*randfunc()+0.1, 0.35*randfunc() + 0.6
-    decay = 8*randfunc()
+    decay = 12*randfunc()
     x = np.exp(-decay * (t-t0)) * height_high   # decaying envelope
     x[np.where(t < t0)] = height_low   # without this, it grow exponentially 'to the left'
     return x
 
-def pluck(t, randfunc=np.random.rand, t0_fac=None):
-    x = expdecay(t)
-    amp0 = (0.45 * randfunc() + 0.5) * np.random.choice([-1, 1])
-    t0 = (2. * randfunc()-1)*0.3 * t[-1] if t0_fac is None else t0_fac*t[-1] # for phase
-    freq = 6400. * randfunc()
-    return amp0*np.sin(freq * (t-t0)) * x
+def pluck(t, randfunc=np.random.rand, freq_range=[50,6400], n_tones=None, t0_fac=None):
+    y = np.zeros(t.shape[0])
+    if n_tones is None: n_tones=np.random.randint(1,4)
+    for i in range(n_tones):
+        amp0 = (0.45 * randfunc() + 0.5) * np.random.choice([-1, 1])
+        t0 = (2. * randfunc()-1)*0.3 * t[-1] if t0_fac is None else t0_fac*t[-1] # for phase
+        freq = freq_range[0] + (freq_range[1]-freq_range[0])*randfunc()
+        y += amp0*np.sin(freq * (t-t0))
+    return y * expdecay(t, t0_fac=t0_fac)
 
 def spikes(t, n_spikes=50, randfunc=np.random.rand):  # "bunch of random spikes"
     x = np.zeros(t.shape[0])
@@ -104,7 +110,7 @@ def read_audio_file(filename, sr=44100):
     signal, sr = librosa.load(filename, sr=sr, mono=True) # convert to mono
     return signal, sr
 
-def readaudio_generator(seconds=2,  path=os.path.expanduser('~')+'/datasets/signaltrain/Val', sr=44100,
+def readaudio_generator(seq_size,  path=os.path.expanduser('~')+'/datasets/signaltrain/Val', sr=44100,
     random_every=True):
     """
     reads audio from any number of audio files sitting in directory 'path'
@@ -115,7 +121,6 @@ def readaudio_generator(seconds=2,  path=os.path.expanduser('~')+'/datasets/sign
     # path = audio files for dataset  (can be Train, Val or test)
     # random_every = get a random window every time next is called, or step sequentially through file
     files = os.listdir(path)
-    seq_size = seconds * sr
     read_new_file = True
     start = -seq_size
     while True:
@@ -170,7 +175,7 @@ def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
 
 
 #---- Effects
-
+@autojit
 def compressor(x, thresh=-24, ratio=2, attack=2048, dtype=np.float32):
     """
     simple compressor effect, code thanks to Eric Tarr @hackaudio
@@ -195,12 +200,12 @@ def compressor(x, thresh=-24, ratio=2, attack=2048, dtype=np.float32):
 
 
 @autojit
-def compressor_new_fast(x, thresh=-24.0, ratio=2.0, attackTime=0.01,releaseTime=0.01, Fs=44100.0, dtype=np.float32):
+def compressor_new_fast(x, thresh=-24.0, ratio=2.0, attackTime=0.01,releaseTime=0.01, sr=44100.0, dtype=np.float32):
     """
     (Minimizing the for loop, removing dummy variables, and invoking numba @autojit made this "fast")
     Inputs:
       x: input signal
-      Fs: sample rate in Hz
+      sr: sample rate in Hz
       thresh: threhold in dB
       ratio: ratio (ratio:1)
       attackTime, releasTime: in seconds
@@ -211,8 +216,8 @@ def compressor_new_fast(x, thresh=-24.0, ratio=2.0, attackTime=0.01,releaseTime=
     lin_A = np.zeros(N, dtype=dtype)  # functions as gain
 
     # Initialize separate attack and release times
-    alphaA = np.exp(-np.log(9)/(Fs * attackTime))#.astype(dtype)
-    alphaR = np.exp(-np.log(9)/(Fs * releaseTime))#.astype(dtype)
+    alphaA = np.exp(-np.log(9)/(sr * attackTime))#.astype(dtype)
+    alphaR = np.exp(-np.log(9)/(sr * releaseTime))#.astype(dtype)
 
     # Turn the input signal into a uni-polar signal on the dB scale
     x_uni = np.abs(x).astype(dtype)
@@ -266,6 +271,7 @@ class Effect():
         self.knob_names = ['knob']
         self.knob_ranges = np.array([[0,1]])  # min,max world coordinate values for "all the way counterclockwise" and "all the way clockwise"
         self.sr = sr
+        self.is_inverse = False  # does this effect do an 'inverse problem' by reversing x & y at the end?
 
     def knobs_wc(self, knobs_nn):   # convert knob vals from [-.5,.5] to "world coordinates" used by effect functions
         return (self.knob_ranges[:,0] + (knobs_nn+0.5)*(self.knob_ranges[:,1]-self.knob_ranges[:,0])).tolist()
@@ -306,7 +312,6 @@ class Echo(Effect):
         self.knob_names = ['delay_samples', 'ratio', 'echoes']
         #self.knob_ranges = np.array([[100,1500], [0.1,0.9],[2,2]])
         self.knob_ranges = np.array([[400,400], [0.4,1.0],[2,2]])
-        self.sr = sr
     def go(self, x, knobs_nn):
         knobs_w = self.knobs_wc(knobs_nn)
         return echo(x, delay_samples=int(np.round(knobs_w[0])), ratio=knobs_w[1], echoes=int(np.round(knobs_w[2]))), x
@@ -314,7 +319,7 @@ class Echo(Effect):
 class PitchShifter(Effect):
     def __init__(self):
         super(PitchShifter, self).__init__()
-        self.name = 'Pitch Shifter'
+        self.name = 'PitchShifter'
         self.knob_names = ['n_steps']
         self.knob_ranges = np.array([[-12,12]])  # number of 12-tone pitch steps by which to shift the signal
     def go(self, x, knobs_nn):
@@ -332,23 +337,76 @@ class Denoise(Effect):  # add noise to x, swap x and y
         self.name = 'Denoise'
         self.knob_names = ['strength']
         self.knob_ranges = np.array([[0.01,0.5]])
+        self.is_inverse = True
     def go(self, x, knobs_nn):
         knobs_w = self.knobs_wc(knobs_nn)
         return x, x + knobs_w[0]*(2*np.random.random(x.shape[0])-1)   # swaps y & x: what was the input becomes the output
 
-# End of effects
 
+class TimeAlign(Effect):  # add noise to x, swap x and y
+    """
+    This affect completely ignores the input x.  Instead it re-synthesizes a time-aligned y,
+    shifts it randomly and outputs that as y
+    """
+    def __init__(self, sr=44100):
+        super(TimeAlign, self).__init__()
+        self.name = 'TimeAlign'
+        self.knob_names = ['strength']
+        self.knob_ranges = np.array([[0.001,0.5]])
+        self.is_inverse = True
+        time_series_length = 4096 # TODO un-hardcode this
+        self.t = np.arange(time_series_length,dtype=np.float32) / sr
+    def go(self, x, knobs_nn):
+        knobs_w = self.knobs_wc(knobs_nn)
+        chooser = np.random.choice([2,4,6,7])
+        y = synth_input_sample(self.t, chooser, t0_fac=0.5)   # start onset in the middle of chunk
+        rand_shift = int(x.shape[0]* knobs_w[0]*(2*np.random.rand()-1)) # shift forward or back by 1/3 of width
+        x = np.roll(y,rand_shift)
+        if rand_shift > 0:
+            x[0:rand_shift] = np.zeros(rand_shift)
+        elif rand_shift < 0:
+            x[-np.abs(rand_shift):] = np.zeros(np.abs(rand_shift))
+        return y, x
+
+
+class LowPass(Effect):
+    # https://gist.github.com/junzis/e06eca03747fc194e322
+    def __init__(self, sr=44100):
+        super(LowPass, self).__init__()
+        self.name = 'LowPass'
+        self.knob_names = ['cutoff']
+        self.knob_ranges = np.array([[10,2000]])  # number of 12-tone pitch steps by which to shift the signal
+        self.sr = 44100.
+    def butter_lowpass(self, cutoff, order=3):
+        nyq = 0.5 * self.sr
+        normal_cutoff = cutoff / nyq
+        b, a = signal.butter(order, normal_cutoff, btype='low', analog=False)
+        return b, a
+    def go(self, x, knobs_nn, order=3):
+        knobs_w = self.knobs_wc(knobs_nn)
+        b, a = self.butter_lowpass(knobs_w[0], order=order)
+        return signal.lfilter(b, a, x), x
+
+
+# End of effects
 
 # Data Generator
 class AudioDataGenerator():
-    def __init__(self, time_series_length, sampling_freq, effect, batch_size=10, requires_grad=True, device=torch.device("cuda:0")):
+    def __init__(self, time_series_length, sampling_freq, effect, batch_size=10, \
+        requires_grad=True, device=torch.device("cuda:0"), path=None):
         super(AudioDataGenerator, self).__init__()
         self.time_series_length = time_series_length
+        self.sr = sampling_freq
         self.t = np.arange(time_series_length,dtype=np.float32) / sampling_freq
         self.effect = effect
         self.batch_size = batch_size
         self.requires_grad = requires_grad
         self.device = device
+        self.path  = path
+        self.ra_gen = None
+        if path is not None:   # the use real audio files instead of synthetic ones
+            self.ra_gen = readaudio_generator(time_series_length,  path=path, sr=self.sr,
+                random_every=True)
 
         # preallocate memory
         self.x = np.zeros((batch_size,time_series_length),dtype=np.float32)
@@ -362,7 +420,10 @@ class AudioDataGenerator():
             #chooser = np.random.choice([1,3,5,6,7])  # for echo
 
         if recyc_x is None:
-            x = synth_input_sample(self.t, chooser)
+            if self.ra_gen is None:
+                x = synth_input_sample(self.t, chooser)
+            else:
+                x = next(self.ra_gen)
         else:
             x = recyc_x   # don't generate new x
 
@@ -373,10 +434,10 @@ class AudioDataGenerator():
 
         return x, y, knobs
 
-    def new(self,chooser=None, knobs=None, recyc_x=False):  # Generate new x, y, knobs  set
+    def new(self,chooser=None, knobs=None, recyc_x=False):  # Generate new x, y, knobs batch
         # was going to try parallel via multiprocessing but it's actually slower than serial
         #self.pool = Pool(processes=10)
-        knobs = None #random_ends(len(self.effect.knob_ranges))-0.5  # same knobs for whole batch
+
         for line in range(self.batch_size):
             if recyc_x:
                 #self.x[line,:], self.y[line,:], self.knobs[line,:] = self.pool.apply_async(partial(self.gen_single, chooser, knobs, recyc_x=self.x[line,:])).get()

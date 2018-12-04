@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-__author__ = 'S.I. Mimilakis'
+__author__ = 'S.I. Mimilakis (w/ mods by S.H. Hawley)'
 __copyright__ = 'MacSeNet'
 
 # imports
@@ -103,24 +103,32 @@ class Synthesis(nn.Module):
         real = torch.transpose(real, 1, 2)
         imag = torch.transpose(imag, 1, 2)
 
-        real = torch.cat((real, Synthesis.flip(real[:, 1:-1, :].contiguous(), 1)), 1)
-        imag = torch.cat((imag, Synthesis.flip(-imag[:, 1:-1, :].contiguous(), 1)), 1)
+        # Hawley removed 'contiguous' with no apparent accuracy changes but a slight performance boost to flip() call
+        #real = torch.cat((real, Synthesis.flip(real[:, 1:-1, :].contiguous(), 1)), 1)
+        #imag = torch.cat((imag, Synthesis.flip(-imag[:, 1:-1, :].contiguous(), 1)), 1)
+        real = torch.cat((real, Synthesis.flip(real[:, 1:-1, :], 1)), 1)
+        imag = torch.cat((imag, Synthesis.flip(-imag[:, 1:-1, :], 1)), 1)
 
         wave_form = self.conv_synthesis_real(real) + self.conv_synthesis_imag(imag)
         wave_form = wave_form[:, :, self.sz:-self.sz]
 
         return wave_form[:, 0, :]
 
+    #According to profiler py-spy, flip() uses more CPU than any other part of code (on large runs), e.g. 40%-70% of total usage.
+    #@staticmethod
+    #def flip(x, dim):
+    #    # https://github.com/pytorch/pytorch/issues/229
+    #    xsize = x.size()
+    #    dim = x.dim() + dim if dim < 0 else dim
+    #    x = x.view(-1, *xsize[dim:])
+    #    x = x.view(x.size(0), x.size(1), -1)[:, getattr(torch.arange(x.size(1) - 1,
+    #                                                                 -1, -1), ('cpu', 'cuda')[x.is_cuda])().long(),
+    #                                         :]
+    #    return x.view(xsize)
     @staticmethod
     def flip(x, dim):
-        # https://github.com/pytorch/pytorch/issues/229
-        xsize = x.size()
-        dim = x.dim() + dim if dim < 0 else dim
-        x = x.view(-1, *xsize[dim:])
-        x = x.view(x.size(0), x.size(1), -1)[:, getattr(torch.arange(x.size(1) - 1,
-                                                                     -1, -1), ('cpu', 'cuda')[x.is_cuda])().long(),
-                                             :]
-        return x.view(xsize)
+        return x.flip(dim)  # flip now in PyTorch, PR #7873 https://github.com/pytorch/pytorch/pull/7873
+
 
     @staticmethod
     def GLA(wsz, hop, N=4096):
@@ -253,14 +261,20 @@ class FNNSynthesis(nn.Module):
         wave_form = self.fnn_synthesis_real(real) + self.fnn_synthesis_imag(imag)
         return wave_form
 
+    #@staticmethod
+    #def flip_old(x, dim):
+    #    # https://github.com/pytorch/pytorch/issues/229
+    #    xsize = x.size()
+    #    dim = x.dim() + dim if dim < 0 else dim
+    #    x = x.view(-1, *xsize[dim:])
+    #    x = x.view(x.size(0), x.size(1), -1)[:, getattr(torch.arange(x.size(1) - 1,
+    #                                         -1, -1), ('cpu', 'cuda')[x.is_cuda])().long(), :]
+    #    return x.view(xsize)
+
+    # Pytorch 0.4.0+ version of flip. slightly faster than flip_old
     @staticmethod
     def flip(x, dim):
-        # https://github.com/pytorch/pytorch/issues/229
-        xsize = x.size()
-        dim = x.dim() + dim if dim < 0 else dim
-        x = x.view(-1, *xsize[dim:])
-        x = x.view(x.size(0), x.size(1), -1)[:, getattr(torch.arange(x.size(1) - 1,
-                                             -1, -1), ('cpu', 'cuda')[x.is_cuda])().long(), :]
-        return x.view(xsize)
-
+        indices = [slice(None)] * x.dim()
+        indices[dim] = torch.arange(x.size(dim) - 1, -1, -1, dtype=torch.long, device=x.device)
+        return x[tuple(indices)]
 # EOF
