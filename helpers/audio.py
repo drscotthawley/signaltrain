@@ -10,6 +10,7 @@ import torch
 import librosa
 from numba import autojit, njit, jit   # Note: nopython version gives symbol errors when used w/ Jupyter Notebook, so using autojit instead
 import os
+import glob
 from helpers import io_methods
 from scipy.io import wavfile
 
@@ -130,7 +131,7 @@ def triangle(t, randfunc=np.random.rand, t0_fac=None): # ramp up then down
     return x + amp_n*(2*np.random.random(t.shape[0])-1)
 
 
-def read_audio_file(filename, sr=44100):
+def read_audio_file(filename, sr=44100, mono=True, norm=False):
     #signal, sr = librosa.load(filename, sr=sr, mono=True, res_type='kaiser_fast') # Librosa's reader is incredibly slow. do not use
 
     #signal, sr = torchaudio.load(filename)#, normalization=True)   # Torchaudio's reader is pretty fast but normalization is a problem
@@ -139,7 +140,12 @@ def read_audio_file(filename, sr=44100):
     #reader = io_methods.AudioIO   # Stylios' file reader. Haven't gotten it working yet
     #signal, sr = reader.audioRead(filename, mono=True)
 
-    sr, signal = wavfile.read(filename)   # scipy works fine and is fast
+    sr, signal = wavfile.read(filename)      # scipy works fine and is fast
+    if mono and (len(signal.shape) > 1):     # convert to mono
+        signal = signal[:,0]
+    if norm:
+        signal = signal/np.max(np.abs(signal))
+
     return signal, sr
 
 def write_audio_file(filename, data, sr=44100):
@@ -149,7 +155,7 @@ def write_audio_file(filename, data, sr=44100):
     return
 
 def readaudio_generator(seq_size,  path=os.path.expanduser('~')+'/datasets/signaltrain/Val', sr=44100,
-    random_every=True):
+    random_every=True, mono=True, norm=False):
     """
     reads audio from any number of audio files sitting in directory 'path'
     supplies a window of length "seconds". If random_every=True, this window will be randomly chosen
@@ -158,14 +164,14 @@ def readaudio_generator(seq_size,  path=os.path.expanduser('~')+'/datasets/signa
     # basepath = directory containing Train, Val, and Test directories
     # path = audio files for dataset  (can be Train, Val or test)
     # random_every = get a random window every time next is called, or step sequentially through file
-    files = os.listdir(path)
+    files = glob.glob(path+"*.wav")
     read_new_file = True
     start = -seq_size
     while True:
         if read_new_file:
             filename = path+'/'+np.random.choice(files)  # pick a random audio file in the directory
             #print("Reading new data from "+filename+" ")
-            data, sr = read_audio_file(filename, sr=sr)
+            data, sr = read_audio_file(filename, sr=sr, mono=mono, norm=norm)
             read_new_file=False   # don't keep switching files  everytime generator is called
 
 

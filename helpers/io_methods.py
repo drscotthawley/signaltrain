@@ -7,8 +7,6 @@ import numpy as np
 import wave as _wave
 from scipy.io.wavfile import write, read
 from sys import platform
-import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pylab as plt
 
 class AudioIO:
