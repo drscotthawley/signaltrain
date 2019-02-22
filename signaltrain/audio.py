@@ -11,8 +11,9 @@ import librosa
 from numba import autojit, njit, jit   # Note: nopython version gives symbol errors when used w/ Jupyter Notebook, so using autojit instead
 import os
 import glob
-from helpers import io_methods
+#import io_methods
 from scipy.io import wavfile
+import configparser  # for reading file-based effect datasets
 
 def random_ends(size=1): # probabilty dist. that emphasizes boundaries
     return np.random.beta(0.8,0.8,size=size)
@@ -250,7 +251,7 @@ def my_clip_min(x, clip_min):  # does the work of np.clip(), which numba doesn't
     return x
 
 @jit(nopython=True)
-def compressor_new_fast(x, thresh=-24.0, ratio=2.0, attackTime=0.01,releaseTime=0.01, sr=44100.0, dtype=np.float32):
+def compressor_4controls(x, thresh=-24.0, ratio=2.0, attackTime=0.01,releaseTime=0.01, sr=44100.0, dtype=np.float32):
     """
     (Minimizing the for loop, removing dummy variables, and invoking numba @autojit made this "fast")
     Inputs:
@@ -295,7 +296,7 @@ def compressor_new_fast(x, thresh=-24.0, ratio=2.0, attackTime=0.01,releaseTime=
     return y.astype(dtype)
 
 
- # this is a echo or delay effect
+ # this is a echo or delay function
 def echo(x, delay_samples=1487, ratio=0.6, echoes=1, dtype=np.float32):
     # ratio = redution ratio
     y = np.copy(x).astype(dtype)
@@ -313,7 +314,7 @@ def echo(x, delay_samples=1487, ratio=0.6, echoes=1, dtype=np.float32):
 
 
 
-# Classes for Effects
+# Classes for Effects. First is the generic/main class. All others are subclass of this
 class Effect():
     """Generic effect super-class
        sub-classed Effects should also define a 'go_wc()' method to execute the actual effect
@@ -338,13 +339,15 @@ class Effect():
     # Effects should also define a 'go_wc' method which executes the effect, mapping input and knobs_nn to output y, x
     #   We return x as well as y, because some effects may reverse x & y (e.g. denoiser)
     def go_wc(self, x, knobs_wc):
-        print("Warning: This effect's go_wc() is undefined")
+        print("Warning: This effect's go_wc() is undefined")  # little hint left for the programmer ;-)
 
-    def go(self, x, knobs_nn, **kwargs):  # this is the interface typically called during training & inference
+    # this is the 'main' interface typically called during training & inference, using normalized knob values [-.5,.5]
+    def go(self, x, knobs_nn, **kwargs):
         knobs_w = self.knobs_wc(knobs_nn)
         return self.go_wc(x, knobs_w, **kwargs)
 
 
+# The following are some "plugins", which call functions that have been defined above
 class Compressor(Effect):
     def __init__(self):
         super(Compressor, self).__init__()
@@ -361,7 +364,7 @@ class Compressor_4c(Effect):  # compressor with 4 controls
         self.knob_names = ['thresh', 'ratio', 'attackTime','releaseTime']
         self.knob_ranges = np.array([[-30,0], [1,5], [1e-3,4e-2], [1e-3,4e-2]])
     def go_wc(self, x, knobs_w):
-        return compressor_new_fast(x, thresh=knobs_w[0], ratio=knobs_w[1], attackTime=knobs_w[2], releaseTime=knobs_w[3]), x
+        return compressor_4controls(x, thresh=knobs_w[0], ratio=knobs_w[1], attackTime=knobs_w[2], releaseTime=knobs_w[3]), x
 
 class Echo(Effect):
     def __init__(self):
@@ -430,7 +433,7 @@ class LowPass(Effect):
         self.name = 'LowPass'
         self.knob_names = ['cutoff']
         self.knob_ranges = np.array([[10,2000]])  # number of 12-tone pitch steps by which to shift the signal
-        self.sr = 44100.
+        self.sr = sr
     def butter_lowpass(self, cutoff, order=3):
         nyq = 0.5 * self.sr
         normal_cutoff = cutoff / nyq
@@ -439,9 +442,46 @@ class LowPass(Effect):
     def go_wc(self, x, knobs_w, order=3):
         b, a = self.butter_lowpass(knobs_w[0], order=order)
         return scipy_signal.lfilter(b, a, x), x
-# End of effects
 
-# See data.py for AudioDataGenerator, etc
+
+class FileEffect(Effect):
+    '''
+     'Fake' effect: All this does is grab info ABOUT a dataset of prerecorded files
+     corresponding to an effect.  This doesn't actually manipulate any audio, all
+     the audio is handled by AudioFileDataSet in data.py
+
+     Relies on a path containing a config file called 'effect_info.ini' and
+     Train/ and Val/ subdirectories, as in...
+
+     MyEffectDataPath/
+          +-- effect_info.ini
+          +-- Train/
+          +-- Val/
+
+     Where the format of effect_info.ini is as in this example of an LA2A with a switch:
+        [effect]                                             <-- this line has to be exactly like this
+        name = LA2A w/ switch                                <--- can have quotes around it or not
+        knob_names = ['Limit/Comp', 'Gain', 'Gain Reduction']  <-- list of names, Python format
+        knob_ranges = [[0,1], [0,100], [0,100]]               <-- list of lists of min & max knob settings
+    '''
+    def __init__(self, path, sr=44100, ):
+        super(FileEffect, self).__init__()
+        self.sr = sr
+
+        # read the effect info config file  "effect_info.ini"
+        config = configparser.ConfigParser()
+        config.read(path+'effect_info.ini')
+        self.name = config['effect']['name']+"(files)"   # tack on "(files)" to the effect name
+        #TODO: note that use of 'eval' below could be a potential security issue
+        self.knob_names = eval(config.get("effect","knob_names"))
+        self.knob_ranges = np.array(eval(config.get("effect","knob_ranges")))
+
+    def go_wc(self, x, knobs_w):
+        return   # dummy op. there is no plugin to call; we're reading from files
+
+# End of 'effects'
+
+# See data.py for AudioFileDataSet, AudioDataGenerator, etc
 
 # utility routine for effects
 def int2knobs(idx:int, knob_ranges:list, settings_per:int) -> list:

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-__author__ = 'S.I. Mimilakis'
+__author__ = 'S.I. Mimilakis and Scott H. Hawley'
 __copyright__ = 'MacSeNet'
 
 import os, subprocess, csv
@@ -8,6 +8,7 @@ import wave as _wave
 from scipy.io.wavfile import write, read
 from sys import platform
 import matplotlib.pylab as plt
+from signaltrain.nn_modules import nn_proc
 
 class AudioIO:
 	""" Class for handling audio input/output operations.
@@ -463,6 +464,35 @@ def plot_valdata(x_val_cuda, knobs_val_cuda, y_val_cuda, y_val_hat_cuda, effect,
 		plt.legend()
 		filename = file_prefix + '_' + str(plot_i) + '.png'
 		savefig(filename)
+	return
+
+
+def plot_spectrograms(model, mag_val, mag_val_hat):
+	'''
+	Routine for plotting magnitude and phase spectorgrams
+	'''
+	plt.figure(1)
+	plt.imshow(mag_val.data.cpu().numpy()[0, :, :].T, aspect='auto', origin='lower')
+	plt.title('Initial magnitude')
+	savefig('mag.png')
+	plt.figure(2)  # <---- Check this out! Some "sub-harmonic" content is generated for the compressor if the analysis weights make only small perturbations
+	plt.imshow(mag_val_hat.data.cpu().numpy()[0, :, :].T, aspect='auto', origin='lower')
+	plt.title('Processed magnitude')
+	savefig('mag_hat.png')
+
+	if isinstance(model, nn_proc.AsymMPAEC):     # Plot the spectrograms
+		plt.matshow(model.dft_analysis.conv_analysis_real.weight.data.cpu().numpy()[:, 0, :] + 1)
+		plt.title('Conv-Analysis Real')
+		savefig('conv_anal_real.png')
+		plt.matshow(model.dft_analysis.conv_analysis_imag.weight.data.cpu().numpy()[:, 0, :])
+		plt.title('Conv-Analysis Imag')
+		savefig('conv_anal_imag.png')
+		plt.matshow(model.dft_synthesis.conv_synthesis_real.weight.data.cpu().numpy()[:, 0, :])
+		plt.title('Conv-Synthesis Real')
+		savefig('conv_synth_real.png')
+		plt.matshow(model.dft_synthesis.conv_synthesis_imag.weight.data.cpu().numpy()[:, 0, :])
+		plt.title('Conv-Synthesis Imag')
+		savefig('conv_synth_imag.png')
 	return
 
 
