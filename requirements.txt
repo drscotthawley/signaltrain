@@ -1,6 +1,7 @@
-torch==0.4
-torchvision==0.2.1 
-scipy>=1.0.0
-matplotlib>=2.1.1
-librosa>=0.6.0
-pysox>=0.3.6a0
+librosa==0.6.2
+matplotlib==3.0.2
+numba==0.42.0
+numpy==1.15.4
+pyglet==1.3.2
+scipy==1.2.0
+torch==1.0.0
