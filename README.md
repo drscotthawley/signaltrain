@@ -32,6 +32,6 @@ If you run into trouble installing, try installing individually the packages in 
 
 ### Running
 
-    cd main_scripts
-    ./gen_synth_data.py
-    ./train_with_knobs.py
+    ./run_train.py --help 
+
+will display a list of options
