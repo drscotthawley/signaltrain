@@ -8,6 +8,8 @@ import numpy as np
 import torch
 import os, sys
 import argparse
+import matplotlib
+matplotlib.use('Agg')
 import signaltrain as st
 
 if __name__ == "__main__":

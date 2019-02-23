@@ -8,9 +8,6 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import os, sys
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pylab as plt
 import time
 from signaltrain import audio, io_methods, learningrate, data, loss_functions
 from signaltrain.nn_modules import nn_proc
@@ -167,7 +164,7 @@ def train(epochs=100, n_data_points=1, batch_size=20, device=torch.device("cuda:
 
 
         # save checkpoint of model to file
-        if ((epoch+1) % 2 == 0):
+        if ((epoch+1) % 25 == 0):
             print(f'\nsaving model to {checkpointname}',end="")
             state_dict = model.module.state_dict() if parallel else model.state_dict()
             state = {'epoch': epoch + 1, 'state_dict':  state_dict,
