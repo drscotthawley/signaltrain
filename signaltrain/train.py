@@ -167,9 +167,10 @@ def train(epochs=100, n_data_points=1, batch_size=20, device=torch.device("cuda:
 
 
         # save checkpoint of model to file
-        if ((epoch+1) % 25 == 0):
+        if ((epoch+1) % 2 == 0):
             print(f'\nsaving model to {checkpointname}',end="")
-            state = {'epoch': epoch + 1, 'state_dict':  model.module.state_dict(),#model.state_dict(),
+            state_dict = model.module.state_dict() if parallel else model.state_dict()
+            state = {'epoch': epoch + 1, 'state_dict':  state_dict,
                 'optimizer': optimizer.state_dict()}
             torch.save(state, checkpointname)
 
