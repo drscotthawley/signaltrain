@@ -55,11 +55,11 @@ will display a list of options
 │   ├── learningrate.py       # implentation of fast.ai learning rate scheduling
 │   ├── loss_functions.py     # this is its own file only because one of us made it so ;-) 
 │   ├── misc.py               # cosmetics
-│   ├── nn_modules            # NN architecture routines: 'fourier' transforms, autoencoder
-│   │   ├── cls_fe_dct_bases.py
-│   │   ├── cls_fe_dft.py
-│   │   ├── __init__.py
-│   │   └── nn_proc.py
+│   └── nn_modules            # NN architecture routines: 'fourier' transforms, autoencoder
+│       ├── cls_fe_dct_bases.py
+│       ├── cls_fe_dft.py
+│       ├── __init__.py
+│       └── nn_proc.py
 ├── utils
 │   ├── gen_synth_data.py    # generates file dataset of synthetic data
 │   └── reshuffle_testval.py
