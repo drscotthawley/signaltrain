@@ -16,7 +16,9 @@ The simplest (& recommended) way to install is via [Anaconda](https://www.anacon
 
     conda env create -f freeze.yml
 
-Or you can try the `requirements.txt` file with pip:
+This will create an environment called 'signaltrain' which you can enable via `conda activate signaltrain`.
+
+Alternatively, you can try pip and the `requirements.txt` file:
 
     pip install -r requirements.txt
 
@@ -24,7 +26,7 @@ If you run into trouble installing, try installing individually the packages in 
 
     conda install -c conda-forge librosa
 
-...and/or, create a brand-new `conda` environment start from there. On Google Cloud Compute, I had to do the following
+...and/or, create a clean `conda` environment start from there. On Google Cloud Compute, I had to do the following
 
     conda create --name signaltrain python=3.6 
     conda activate signaltrain
