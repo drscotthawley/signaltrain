@@ -132,7 +132,12 @@ def triangle(t, randfunc=np.random.rand, t0_fac=None): # ramp up then down
     return x + amp_n*(2*np.random.random(t.shape[0])-1)
 
 
-def read_audio_file(filename, sr=44100, mono=True, norm=False):
+def read_audio_file(filename, sr=44100, mono=True, norm=False, dtype=np.float32):
+    """
+    Generic wrapper for reading an audio file.
+    Different libraries offer different speeds for this, so this routine is the
+    'catch-all' for whatever read routine happens to work best
+    """
     #signal, sr = librosa.load(filename, sr=sr, mono=True, res_type='kaiser_fast') # Librosa's reader is incredibly slow. do not use
 
     #signal, sr = torchaudio.load(filename)#, normalization=True)   # Torchaudio's reader is pretty fast but normalization is a problem
@@ -146,6 +151,9 @@ def read_audio_file(filename, sr=44100, mono=True, norm=False):
         signal = signal[:,0]
     if norm:
         signal = signal/np.max(np.abs(signal))
+
+    if isinstance(signal[0], np.int16): # but some files are ints and should be floats (this conversion slows things down)
+        signal = np.array(signal, dtype=dtype)/32767.0   # change from [-32767..32767] to [-1..1]
 
     return signal, sr
 
@@ -470,7 +478,8 @@ class FileEffect(Effect):
 
         # read the effect info config file  "effect_info.ini"
         config = configparser.ConfigParser()
-        config.read(path+'effect_info.ini')
+        config.read(path+'/effect_info.ini')
+        print(config.sections())
         self.name = config['effect']['name']+"(files)"   # tack on "(files)" to the effect name
         #TODO: note that use of 'eval' below could be a potential security issue
         self.knob_names = eval(config.get("effect","knob_names"))
@@ -510,7 +519,7 @@ def int2knobs(idx:int, knob_ranges:list, settings_per:int) -> list:
   [1.0, 2.0, 3.0, 4.0]
   """
   sp, nk = settings_per, len(knob_ranges)  # mere abbreviations, nk=num_knobs
-  assert idx < sp**nk, "idx must be less than max range of possible values"
+  assert idx < sp**nk, f"idx ({idx}) must be less than max range of possible values ({sp**nk})"
   knobs = []
   for i in range(nk-1,-1,-1):         # loop over knobs and multiples of sp
     sp_pow = sp**i

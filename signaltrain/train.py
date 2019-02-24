@@ -14,7 +14,7 @@ from signaltrain.nn_modules import nn_proc
 
 
 def train(epochs=100, n_data_points=1, batch_size=20, device=torch.device("cuda:0"), \
-    plot_every=10, effect=audio.Compressor_4c(), sr=44100, datapath=None):
+    plot_every=10, effect=audio.Compressor_4c(), sr=44100, datapath=None, synth_prob=0.5):
     '''
     '''
 
