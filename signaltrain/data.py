@@ -48,8 +48,9 @@ class AudioFileDataSet(Dataset):
         # get a list of available files.  Note that knob settings are included to the target filenames
         self.input_filenames = sorted(glob.glob(self.processed_dir+self.path+'/'+'input_*'))
         self.target_filenames = sorted(glob.glob(self.processed_dir+self.path+'/'+'target_*'))
-        print("AudioFileDataSet: Found",len(self.input_filenames),"i-o pairs in path",self.path)
-        assert len(self.input_filenames) == len(self.target_filenames)   # TODO: One can image a scheme with multiple targets per input
+        print("AudioFileDataSet: Found",len(self.input_filenames),"input files and",
+            len(self.target_filenames)," target files in path",self.path)
+        assert len(self.input_filenames) == len(self.target_filenames)   # TODO: One can imagine a scheme with multiple targets per input
 
         print("  AudioFileDataSet: Check to make sure input & target filenames sorted together in the same order:")
         for i in range(10):
@@ -68,9 +69,12 @@ class AudioFileDataSet(Dataset):
         self.y = np.zeros((files_to_load,len(audio_targ) ),dtype=self.dtype)
         self.knobs = np.zeros((files_to_load, self.num_knobs ),dtype=self.dtype)
         for i in range(files_to_load):
-            if ((i+1) % 1000 == 0) or (i+1 == files_to_load):
+            if ((i+1) % 100 == 0) or (i+1 == files_to_load):
                 print("\r       i = ",i+1,"/",files_to_load,sep="",end="")
-            self.x[i], self.y[i], self.knobs[i] = self.read_one_new_file_pair(idx=i)
+            tmp_x, tmp_y, self.knobs[i] = self.read_one_new_file_pair(idx=i)
+            x_len = min( tmp_x.shape[0], self.x.shape[1] )
+            y_len = min( tmp_y.shape[0], self.y.shape[1] )
+            self.x[i,0:x_len], self.y[i,0:y_len] = tmp_x[0:x_len], tmp_y[0:y_len] # only copy what we've allocated space for
         if (self.skip_over > 0):
             print("\nAudioFileDataSet: We'll be skipping the first",self.skip_over,"samples in each chunk")
             self.y[:,0:self.skip_over] = self.x[:,0:self.skip_over] # overwrite first part of targets, to facilitate training
@@ -144,6 +148,7 @@ class AudioFileDataSet(Dataset):
             in_audio, targ_audio, knobs_wc = self.x[i], self.y[i], self.knobs[i]  # note these might be, e.g. 10 seconds long
 
         # Grab a random chunk from audio
+        assert len(in_audio) > self.chunk_size, f"Error: len(in_audio)={len(in_audio)}, must be > self.chunk_size={self.chunk_size}"
         ibgn = np.random.randint(0, len(in_audio) - self.chunk_size)
         x_item = in_audio[ibgn:ibgn+self.chunk_size]
         y_item = targ_audio[ibgn:ibgn+self.chunk_size]
