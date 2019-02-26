@@ -10,6 +10,7 @@ import torch
 import librosa
 from numba import autojit, njit, jit   # Note: nopython version gives symbol errors when used w/ Jupyter Notebook, so using autojit instead
 import os
+import sys
 import glob
 #import io_methods
 from scipy.io import wavfile
@@ -474,8 +475,13 @@ class FileEffect(Effect):
     '''
     def __init__(self, path, sr=44100, ):
         super(FileEffect, self).__init__()
-        self.sr = sr
 
+        if (path is None) or (not glob.glob(path+"/Train/target*")) \
+            or (not glob.glob(path+"/Val/target*")) or ((not glob.glob(path+"/effect_info.ini"))):
+            print(f"Error: can't file target output files or effect_info.ini in path = {path}")
+            sys.exit(1)   # Yea, this is fatal
+
+        self.sr = sr
         # read the effect info config file  "effect_info.ini"
         config = configparser.ConfigParser()
         config.read(path+'/effect_info.ini')

@@ -43,41 +43,36 @@ if __name__ == "__main__":
     # Check arguments before beginning to train....
 
     # establish which audio effect class is being used
-    if args.effect == 'files':   # target outputs are given as files rather than 'live' 'plugins'
+    e = args.effect
+    if e == 'files':   # target outputs are given as files rather than 'live' 'plugins'
         # TODO: check to make sure there are a suitable number of 'target' files in path
-        # minimal check: for existence of path/Train/target* and path/Val_target*
-        if (args.path is None) or (not glob.glob(args.path+"/Train/target*")) \
-            or (not glob.glob(args.path+"/Val/target*")) or ((not glob.glob(args.path+"/effect_info.ini"))):
-            print(f"Error: can't file target output files or effect_info.ini in args.path = {args.path}")
-            sys.exit(1)
         effect = st.audio.FileEffect(args.path)
-    #  otherwise, targets are created 'live' i.e. on the fly
-    elif args.effect == 'comp_4c':
+    elif e == 'comp_4c':
         effect = st.audio.Compressor_4c()
-    elif args.effect == 'comp':
+    elif e == 'comp':
         effect = st.audio.Compressor()
-    elif args.effect == 'lowpass':
+    elif e == 'lowpass':
         effect = st.audio.LowPass()
-    elif 'VST:' in args.effect:
+    elif 'VST' in e:
         print("VST plugins not integrated yet, but that would be great.")
         print("Feel free to grab Igor Gadelha' VSTRender lib to help implement this.")
         print("See https://github.com/igorgad/dpm")
         sys.exit(1)
     else:
-        print(f"Effect option '{args.effect}' is not yet added")
+        print(f"Effect option '{e}' is not yet added")
         sys.exit(1)
 
     # this is just to avoid confusion: the datagenerator class will/should trap for this also.
     if (args.path is None) or (not glob.glob(args.path+"/Train/input*")) \
         or (not glob.glob(args.path+"/Val/input*")):  # no input files = 100% probability of synth'ing input data
-        args.synthprob = 1.0
+        args.synthprob = 1.0    # this isn't used yet, but passed anyway for later use
     if effect is st.audio.FileEffect:
         args.synthprob = 0.0    # can't run pre-recorded effects post-facto
 
     # Finished parsing/checking arguments, ready to run
 
 
-    st.misc.print_choochoo(__version__)             #  ascii art is the hallmark of a highly developed application
+    st.misc.print_choochoo(__version__)  #  ascii art is the hallmark of professionalism
 
     print("Running with args =",args)
 
