@@ -27,7 +27,8 @@ def mae(x, x_hat):
 def calc_loss(y_hat, y_cuda, mag, batch_size=20):
     # Reconstruction term plus regularization -> Slightly less wiggly waveform
     #loss = logcosh(y_hat, y_cuda) + 1e-5*torch.abs(mag).mean()
-    loss = logcosh(y_hat, y_cuda) + 2e-5*torch.abs(mag).mean()
+    # loss = logcosh(y_hat, y_cuda) + 2e-5*torch.abs(mag).mean() 
+    loss = logcosh(y_hat, y_cuda) + 4e-5*torch.abs(mag).mean()    # second term is an L1 regularization to help 'damp' high-freq noise
     return loss
 
 
