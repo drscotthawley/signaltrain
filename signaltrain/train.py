@@ -42,7 +42,7 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
 
     # Setup the Model
     #model = nn_proc.AsymMPAEC(expected_time_frames, ft_size=ft_size, hop_size=hop_size, n_knobs=num_knobs, output_tf=output_time_frames)
-    model = nn_proc.st_model(scale_factor=1, shrink_factor=4, num_knobs=num_knobs, sr=sr)
+    model = nn_proc.st_model(scale_factor=scale_factor, shrink_factor=shrink_factor, num_knobs=num_knobs, sr=sr)
     chunk_size, out_chunk_size = model.in_chunk_size, model.out_chunk_size
     y_size = out_chunk_size
     print("Model defined.  Number of trainable parameters:",sum(p.numel() for p in model.parameters() if p.requires_grad))
