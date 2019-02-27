@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 __author__ = 'S.H. Hawley'
 
+"""
+Routines related to audio datasets, either consisting of files or generated/synthesized
+on the fly
+"""
+
+
 # imports
 import numpy as np
 import torch
@@ -10,8 +16,14 @@ from torch.utils.data import Dataset
 from . import audio
 
 
-def worker_init(worker_id): # used with PyTorch DataLoader
-    np.random.seed()  # TODO: note that this current implementation prevents strict reproducability.
+def worker_init(worker_id):
+    """
+    used with PyTorch DataLoader so that we can grab random bits of files or
+    synth random input data on the fly
+    Without this you get the same thing every epoch
+    """
+    # NOTE that this current implementation prevents strict reproducability
+    np.random.seed()
 
 
 class AudioFileDataSet(Dataset):
@@ -175,7 +187,8 @@ class AudioFileDataSet(Dataset):
         return self.get_single_chunk()
 
 
-class AudioDataGenerator(Dataset):
+
+class SynthAudioDataSet(Dataset):
     """
     Generates synthetic audio data on the fly
 
@@ -188,7 +201,7 @@ class AudioDataGenerator(Dataset):
        See https://pytorch.org/docs/stable/notes/faq.html#dataloader-workers-random-seed
     """
     def __init__(self, chunk_size,  effect, sr=44100, datapoints=8000, dtype=np.float32, recycle=False):
-        super(AudioDataGenerator, self).__init__()
+        super(SynthAudioDataSet, self).__init__()
         self.chunk_size = chunk_size
         self.effect = effect
         self.sr = sr

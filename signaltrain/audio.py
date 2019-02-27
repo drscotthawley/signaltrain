@@ -10,6 +10,7 @@ import torch
 import librosa
 from numba import autojit, njit, jit   # Note: nopython version gives symbol errors when used w/ Jupyter Notebook, so using autojit instead
 import os
+import sys
 import glob
 #import io_methods
 from scipy.io import wavfile
@@ -81,7 +82,8 @@ def randsine(t, randfunc=np.random.rand, amp_range=[0.2,0.9], freq_range=[5,150]
 def box(t, randfunc=np.random.rand, t0_fac=None):
     height_low, height_high = 0.3*randfunc()+0.1, 0.35*randfunc() + 0.6
     maxi = len(t)
-    delta = 1+ maxi//100     # slope the sides slightly
+    delta = 1    # 1 is an immediate step response
+    #delta += maxi//100     # slope the sides slightly
     i_up = delta+int( 0.3*randfunc() * maxi) if t0_fac is None else int(t0_fac*maxi)
     i_dn = min( i_up + int( (0.3+0.35*randfunc())*maxi), maxi-delta-1)   # time for jumping back down
     x = height_low*np.ones(t.shape[0]).astype(t.dtype)  # noise of unit amplitude
@@ -90,9 +92,13 @@ def box(t, randfunc=np.random.rand, t0_fac=None):
     x[i_dn-delta:i_dn+delta] = height_high - (height_high-height_low)*(np.arange(2*delta))/2/delta
     return x
 
-def expdecay(t, randfunc=np.random.rand, t0_fac=None):
+def expdecay(t, randfunc=np.random.rand, t0_fac=None, high_fac=None, low_fac=None):
+    """generic exponential decay envelope; called by other routines (below)
+       t0_fac is fraction of final time at which to start
+    """
     t0 = 0.35*randfunc()*t[-1] if t0_fac is None else t0_fac*t[-1]
-    height_low, height_high = 0.1*randfunc()+0.1, 0.35*randfunc() + 0.6
+    height_high = 0.35*randfunc() + 0.6 if high_fac is None else high_fac
+    height_low = 0.1*randfunc()+0.1 if low_fac is None else low_fac
     decay = 12*randfunc()
     x = np.exp(-decay * (t-t0)) * height_high   # decaying envelope
     x[np.where(t < t0)] = height_low   # without this, it grow exponentially 'to the left'
@@ -100,6 +106,7 @@ def expdecay(t, randfunc=np.random.rand, t0_fac=None):
 
 def pluck(t, randfunc=np.random.rand, freq_range=[50,6400], n_tones=None, t0_fac=None):
     y = np.zeros(t.shape[0])
+    """ supposed to be like a plucked string; but with a few random tones as well"""
     if n_tones is None: n_tones=np.random.randint(1,4)
     for i in range(n_tones):
         amp0 = (0.45 * randfunc() + 0.5) * np.random.choice([-1, 1])
@@ -107,6 +114,30 @@ def pluck(t, randfunc=np.random.rand, freq_range=[50,6400], n_tones=None, t0_fac
         freq = freq_range[0] + (freq_range[1]-freq_range[0])*randfunc()
         y += amp0*np.sin(freq * (t-t0))
     return y * expdecay(t, t0_fac=t0_fac)
+
+def ampexpstepup(t, randfunc=np.random.rand, freq=None, freq_range=[400,5000], start_dB=-40):
+    """ sine wave with exponentially increase amplitude
+    cf. Figure 3 of AES Conf Paper 6849: "Parameter Estimation of Dynamic Range Compressors: Models, Procedures and Test Signals"
+    http://www.aes.org/e-lib/browse.cfm?elib=13653
+    ...except we typically won't do a signal that long (theirs is ~120 seconds)
+    ...Looks lik they stey by 1dB for about 50 steps across the clip
+    """
+    env_dB = np.floor( np.linspace(start_dB, 0, num=len(t)) ) # envelope in integer steps from start_dB to 0dB
+    env = np.power(10.0, env_dB/10)                      # envelope in float values
+    if freq is None:  #  Otherwise, the user has specified a frequency in Hz
+        freq = freq_range[0] + (freq_range[1]-freq_range[0])*randfunc() # pick a freq
+    return  env * np.sin(freq * t)
+
+def sweep(t, randfunc=np.random.rand, freq_range=[20,20000], amp_too=False):
+    """exponential frequency sweep
+    """
+    tmax = t[-1]
+    lnfr = np.log(freq_range[1]/freq_range[0])  # ln of frequency ratio
+    amp = 0.9*randfunc()
+    y =  amp* np.sin( 20 *2*np.pi*tmax/lnfr * (np.exp(t/tmax*lnfr)-1) )
+    if amp_too:         # exponentially increase the amplitude as well
+        y *= np.exp(lnfr*t/tmax)
+    return y
 
 def spikes(t, n_spikes=50, randfunc=np.random.rand):  # "bunch of random spikes"
     x = np.zeros(t.shape[0])
@@ -200,7 +231,7 @@ def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
     Synthesizes one instance from various 'fake' audio wave forms -- synthetic data
     """
     if chooser is None:
-        chooser = np.random.randint(0, 7)
+        chooser = np.random.randint(0, 10)
 
     if 0 == chooser:                     # sine, with random phase, amp & freq
         return randsine(t, t0_fac=t0_fac)
@@ -219,7 +250,13 @@ def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
     elif 7 == chooser:                # noisy 'pluck'
         amp_n = (0.3*randfunc()+0.1)
         return pluck(t,t0_fac=t0_fac) + amp_n*(2*np.random.random(t.shape[0])-1)  #noise centered around 0
-    elif 8 == chooser:                  # just white noise
+    elif 8 == chooser:
+        return ampexpstepup(t, start_dB=-30) # increasing amplitude-steps of sine wave
+    elif 9 == chooser:
+        f_low, f_high  = np.random.randint(20,1000), np.random.randint(1000,20000)
+        amp_too = np.random.choice([False,False,True])
+        return sweep(t, freq_range=[f_low, f_high], amp_too=amp_too)
+    elif 10 == chooser:                  # just white noise
         amp_n = (0.6*randfunc()+0.2)
         return amp_n*(2*np.random.rand(t.shape[0])-1)
     else:
@@ -474,8 +511,13 @@ class FileEffect(Effect):
     '''
     def __init__(self, path, sr=44100, ):
         super(FileEffect, self).__init__()
-        self.sr = sr
 
+        if (path is None) or (not glob.glob(path+"/Train/target*")) \
+            or (not glob.glob(path+"/Val/target*")) or ((not glob.glob(path+"/effect_info.ini"))):
+            print(f"Error: can't file target output files or effect_info.ini in path = {path}")
+            sys.exit(1)   # Yea, this is fatal
+
+        self.sr = sr
         # read the effect info config file  "effect_info.ini"
         config = configparser.ConfigParser()
         config.read(path+'/effect_info.ini')

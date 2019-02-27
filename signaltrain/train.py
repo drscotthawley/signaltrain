@@ -9,106 +9,105 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 import os, sys
 import time
-from signaltrain import audio, io_methods, learningrate, data, loss_functions
+from signaltrain import audio, io_methods, learningrate, data, loss_functions, misc
 from signaltrain.nn_modules import nn_proc
 
 
-def train(epochs=100, n_data_points=1, batch_size=20, device=torch.device("cuda:0"), \
-    plot_every=10, effect=audio.Compressor_4c(), sr=44100, datapath=None, synth_prob=0.5):
-    '''
-    '''
+def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_size=20,
+    device=torch.device("cuda:0"), plot_every=10, cp_every=25, sr=44100, datapath=None,
+    scale_factor=1, shrink_factor=4, synth_prob=0.5):
+    """
+    Main training routine for signaltrain
 
-    # Data settings
-    scale_factor = 1  # change dimensionality of run by this factor
-    chunk_size = int(8192 * scale_factor)   # size of audio that NN model expects as input
-    output_sf = 4     # output shrink factor, i.e. fraction of output actually trained on
-    out_chunk_size = chunk_size // output_sf        # size of output audio that we actually care about
-    print("Input chunk size =",chunk_size)
-    print("Output chunk size =",out_chunk_size)
-    print("Sample rate =",sr)
+    Parameters:
+        effect:           class for the audio effect to learn (see audio.py)
+        epochs:           how many epochs to run over
+        n_data_points:    data instances per epoch (or iterations per epoch)
+        batch_size:       batch size
+        device:           pytorch device to run on, either cpu or cuda (GPU)
+        plot_every:       how often to generate plots of sample outputs
+        cp_every:         save checkpoint every this many iterations
+        scale_factor:     change overal dimensionality of i/o chunks by this factor
+        shrink_factor:    output shrink factor, i.e. fraction of output actually trained on
+        synth_prob:       TODO: unused. might use it to combine on-the-fly data-gen with files
+    """
 
-    # Analysis parameters
-    ft_size = int(1024 * scale_factor)
-    hop_size = int(384 * scale_factor)
-    expected_time_frames = int(np.ceil(chunk_size/float(hop_size)) + np.ceil(ft_size/float(hop_size)))
-    output_time_frames = int(np.ceil(out_chunk_size/float(hop_size)) + np.ceil(ft_size/float(hop_size)))
-    y_size = (output_time_frames-1)*hop_size - ft_size
-    print("expected_time_frames =",expected_time_frames,", output_time_frames =",output_time_frames,", y_size =",y_size)
-    # print info about this run
-    print(f'SignalTrain execution began at {time.time()}. Options:')
-    print(f'    epochs = {epochs}, n_data_points = {n_data_points}, batch_size = {batch_size}, ')
-    print(f'    scale_factor = {scale_factor}:  chunk_size = {chunk_size}, ft_size = {ft_size}, hop_size = {hop_size}')
-    if effect is not None:
-        effect.info()  # Print effect settings
+    # print info about this training run
+    print(f'SignalTrain training execution began at {time.time()}. Options:')
+    print(f'    epochs = {epochs}, n_data_points = {n_data_points}, batch_size = {batch_size}')
+    print(f'    scale_factor = {scale_factor}, shrink_factor = {shrink_factor}')
+    num_knobs = len(effect.knob_names)
+    print(f'    num_knobs = {num_knobs}')
+    effect.info()  # Print effect settings
+
+    # Setup the Model
+    #model = nn_proc.AsymMPAEC(expected_time_frames, ft_size=ft_size, hop_size=hop_size, n_knobs=num_knobs, output_tf=output_time_frames)
+    model = nn_proc.st_model(scale_factor=scale_factor, shrink_factor=shrink_factor, num_knobs=num_knobs, sr=sr)
+    chunk_size, out_chunk_size = model.in_chunk_size, model.out_chunk_size
+    y_size = out_chunk_size
+    print("Model defined.  Number of trainable parameters:",sum(p.numel() for p in model.parameters() if p.requires_grad))
+
+    # Specify learning rate schedule...although we don't bother stepping the momentum
+    lr_max = 8.0e-4                         # obtained after running helpers.learningrate.lr_finder.py
+    lrs = learningrate.get_1cycle_schedule(lr_max=lr_max, n_data_points=n_data_points, epochs=epochs, batch_size=batch_size)
+
+    # Initialize optimizer. given our "random" training data, weight decay seem to doesn't help but rather slows training way down
+    optimizer = torch.optim.Adam(list(model.parameters()), lr=lrs[0], weight_decay=0)
 
     # Are we synthesizing data or do we expect it to come from files
     synth_data = datapath is None
 
-    # setup/load data, get number of knobs for model
-    if synth_data:  # synthesize data
-        dataset = data.AudioDataGenerator(chunk_size, effect, sr=sr, datapoints=n_data_points)
-        dataset_val = data.AudioDataGenerator(chunk_size, effect, sr=sr, datapoints=n_data_points//4, recycle=True)
+    # Setup/load data
+    if synth_data:  # synthesize data  # TODO: warning: broke this a while ago in favor of using files.
+        dataset = data.SynthAudioDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points)
+        dataset_val = data.SynthAudioDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4, recycle=True)
     else: # use files
-        dataset = data.AudioFileDataSet(chunk_size, effect, sr=sr,  datapoints=n_data_points, path=datapath+"/Train/",  y_size=y_size, rerun=False)
-        dataset_val = data.AudioFileDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4, path=datapath+"/Val/", y_size=y_size, rerun=False)
-    num_knobs = dataset.num_knobs
-    print("num_knobs = ",num_knobs)
+        dataset = data.AudioFileDataSet(chunk_size, effect, sr=sr,  datapoints=n_data_points, path=datapath+"/Train/",  y_size=out_chunk_size, rerun=False)
+        dataset_val = data.AudioFileDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4, path=datapath+"/Val/", y_size=out_chunk_size, rerun=False)
+
     dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=10, shuffle=True, worker_init_fn=data.worker_init) # need worker_init for more variance
     dataloader_val = DataLoader(dataset_val, batch_size=batch_size, num_workers=10, shuffle=False)
 
-    # Setup the Model
 
-    # Initialize nn modules
-    model = nn_proc.AsymMPAEC(expected_time_frames, ft_size=ft_size, hop_size=hop_size, n_knobs=num_knobs, output_tf=output_time_frames)
-    print("Model defined.  Number of trainable parameters:",sum(p.numel() for p in model.parameters() if p.requires_grad))
-    #model = nn_proc.Ensemble(model, N=4)
-
-    # load from checkpoint
+    # Load from checkpoint if it exists
     checkpointname = 'modelcheckpoint.tar'
-    if os.path.isfile(checkpointname):
-        print("Checkpoint file found. Loading weights.")
-        checkpoint = torch.load(checkpointname,) # map_location=device)
-        model.load_state_dict(checkpoint['state_dict'])
+    state_dict, rv = misc.load_checkpoint(checkpointname, fatal=False)
+    if state_dict != {}:
+        model.load_state_dict(state_dict)
+        # TODO: set optimizer state from checkpoint
 
+
+    # Copy model to (other) GPU if possbible
     parallel = torch.cuda.device_count() > 1
     if parallel:       # For Hawley's 2 GPUs this cuts execution time down by ~30% (not 50%)
         print("Replicating NN model for data-parallel execution across", torch.cuda.device_count(), "GPUs")
         model = nn.DataParallel(model)
-    model.to(device)
+    model.to(device)             # put the model on the GPU if it wasn't already
 
 
-    # learning rate schedule...although we don't bother stepping the momentum
-    lr_max = 8.0e-4                         # obtained after running helpers.learningrate.lr_finder.py
-    lrs = learningrate.get_1cycle_schedule(lr_max=lr_max, n_data_points=n_data_points, epochs=epochs, batch_size=batch_size)
-
-    # Initialize optimizer. given our "random" training data, weight decay doesn't help but rather slows training way down
-    optimizer = torch.optim.Adam(list(model.parameters()), lr=lrs[0], weight_decay=0)
-
-    # setup log file
+    # Setup log file
     logfilename = "vl_avg_out.dat"   # Val Loss, average, output
     with open(logfilename, "w") as myfile:  # save progress of val loss
         myfile.close()
 
 
-
-    # epochs
+    # Loop over epochs
+    iter_count, batch_num, status_every = 0, 0, 10   # some loop-related meta-variabled initializations
     avg_loss, vl_avg, beta = 0.0, 0.0, 0.98  # for reporting, average over last 50 iterations
-    iter_count = 0
-    first_time = time.time()
-    batch_num, status_every = 0, 10
+    first_time = time.time()                 # start the clock for logging purposes
     for epoch in range(epochs):
         print("")
-        data_point=0
+        data_point=0                         # within this epoch, count which 'data point' we're using (i.e. which audio sample is at the beginning of our batch)
 
         # Training phase
         model.train()
         for x, y, knobs in dataloader:
-            x_cuda, y_cuda, knobs_cuda = x.to(device), y.to(device), knobs.to(device)
+            x_cuda, y_cuda, knobs_cuda = x.to(device), y.to(device), knobs.to(device) # TODO: does DataLoader already do this?
 
             lr = lrs[min(iter_count, len(lrs)-1)]  # get value for learning rate
             data_point += batch_size
 
-            # forward synthesis
+            # feed-forward synthesis
             y_hat, mag, mag_hat = model.forward(x_cuda, knobs_cuda)
             loss = loss_functions.calc_loss(y_hat, y_cuda, mag_hat)
 
@@ -131,7 +130,7 @@ def train(epochs=100, n_data_points=1, batch_size=20, device=torch.device("cuda:
                 model.clip_grad_norm_()   # for non-DataParallel
             optimizer.step()
 
-            # Learning rate scheduling
+            # Apply Learning rate scheduling
             optimizer.param_groups[0]['lr'] = lr     # adjust according to schedule
             iter_count += 1
         # end of loop over training batches. Training phase finished for this epoch
@@ -151,7 +150,7 @@ def train(epochs=100, n_data_points=1, batch_size=20, device=torch.device("cuda:
                 timediff = time.time() - first_time
                 print(f"\repoch {epoch+1}/{epochs}, time: {timediff:.2f}: lr = {lr:.2e}, data_point {data_point}: loss: {smoothed_loss:.3e} val_loss: {vl_avg:.3e}   ",end="")
 
-        #  Various forms of status output...
+        #  Write various forms of status output...
         with open(logfilename, "a") as myfile:  # save progress of val loss to text file
             myfile.write(f"{epoch+1} {vl_avg:.3e}\n")
 
@@ -159,17 +158,12 @@ def train(epochs=100, n_data_points=1, batch_size=20, device=torch.device("cuda:
             print("\nSaving sample data plots",end="")
             io_methods.plot_valdata(x_val_cuda, knobs_val_cuda, y_val_cuda, y_val_hat, effect, epoch, loss_val, target_size=y_size)
 
-        if ((epoch+1) % 50 == 0) or (epoch == epochs-1):
+        if ((epoch+1) % 50 == 0) or (epoch == epochs-1):    # write out spectrogams from time to time
             io_methods.plot_spectrograms(model, mag_val, mag_val_hat)
 
-
-        # save checkpoint of model to file
-        if ((epoch+1) % 25 == 0):
-            print(f'\nsaving model to {checkpointname}',end="")
-            state_dict = model.module.state_dict() if parallel else model.state_dict()
-            state = {'epoch': epoch + 1, 'state_dict':  state_dict,
-                'optimizer': optimizer.state_dict()}
-            torch.save(state, checkpointname)
+        # save checkpoint of model to file, which can be loaded later
+        if ((epoch+1) % cp_every == 0):
+            misc.save_checkpoint(checkpointname, model, epoch, parallel, optimizer, effect, sr)
 
     print("\nTotal elapsed time =",time.time() - first_time)
     return None

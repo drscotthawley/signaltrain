@@ -5,6 +5,7 @@ __copyright__ = 'MacSeNet'
 
 # imports
 import torch
+import numpy as np
 import torch.nn as nn
 from .cls_fe_dft import Analysis, Synthesis
 
@@ -107,10 +108,11 @@ class AsymAutoEncoder(nn.Module):
         return result
 
 
-class AsymMPAEC(nn.Module):  # mag-phase autoencoder
+class AsymMPAEC(nn.Module):
     """
-        Class for building the analysis part
-        of the Front-End ('Fe').
+        Asymmetric Magnitude-Phase AutoEncoder (with Knobs)
+        'asymmetric' because output size != input size
+        See st_model() below for generic calling
     """
     def __init__(self, expected_time_frames, ft_size=1024, hop_size=384, decomposition_rank=64, n_knobs=3, output_tf=None):
         super(AsymMPAEC, self).__init__()
@@ -161,6 +163,51 @@ class AsymMPAEC(nn.Module):  # mag-phase autoencoder
 
 
 
+class st_model(nn.Module):
+    """
+    Wrapper routine for AsymMPAEC.  Enables generic call in case we change later
+    """
+    def __init__(self, scale_factor=1, shrink_factor=4, num_knobs=3, sr=44100):
+        """
+            scale_factor: change dimensionality of run by this factor
+            shrink_factor:  output shrink factor, i.e. fraction of output actually trained on
+
+        """
+        super(st_model, self).__init__()
+
+        # Data settings
+        chunk_size = int(8192 * scale_factor)           # size of audio that NN model expects as input
+        out_chunk_size = chunk_size // shrink_factor     # size of output audio that we actually care about
+
+        # save these variables for use when loading models later
+        self.scale_factor, self.shrink_factor = scale_factor, shrink_factor
+        self.in_chunk_size, self.out_chunk_size = chunk_size, out_chunk_size
+        self.num_knobs = num_knobs
+
+        print("Input chunk size =",chunk_size)
+        print("Output chunk size =",out_chunk_size)
+        print("Sample rate =",sr)
+
+        # Analysis parameters
+        ft_size = int(1024 * scale_factor)
+        hop_size = int(384 * scale_factor)
+        expected_time_frames = int(np.ceil(chunk_size/float(hop_size)) + np.ceil(ft_size/float(hop_size)))
+        output_time_frames = int(np.ceil(out_chunk_size/float(hop_size)) + np.ceil(ft_size/float(hop_size)))
+        y_size = (output_time_frames-1)*hop_size - ft_size
+        assert y_size == out_chunk_size, f"Error: ysize ({ysize}) should equal out_chunk_size ({out_chunk_size})"
+
+        self.mpaec = AsymMPAEC(expected_time_frames, ft_size=ft_size, hop_size=hop_size, n_knobs=num_knobs, output_tf=output_time_frames)
+
+    def clip_grad_norm_(self):
+        self.mpaec.clip_grad_norm_()
+
+    def forward(self, x_cuda, knobs_cuda):
+        return self.mpaec.forward(x_cuda, knobs_cuda)
+
+
+
+'''
+# Hasn't been used in a while
 class Ensemble(nn.Module):
     """
     makes an ensemble of similar models from a 'seed' model
@@ -194,6 +241,6 @@ class Ensemble(nn.Module):
     def backward(self):
         for i in range(len(self.models)):
             self.models[i].backward()
-
+'''
 
 # EOF

@@ -32,7 +32,19 @@ If you run into trouble installing, try installing individually the packages in 
     conda activate signaltrain
     pip install -r requirements.txt 
 
-### Running
+### Dataset creation
+
+For synthetic data using using the 4-knob compressor routine, this will create a directory called 'mydata' with Train/ and Val/ directories, and synthesize 5-second-long audio files, for 10 settings *per knob*: 
+
+    ./gen_dataset.py mydata --dur 5  --effect comp_4c --sp 10 
+    
+To incorporate (or add) other audio files (e.g. music) to this, specify `--inpath` pointing to a directory which should *already contain* Train/ and Val/ (and maybe Test) directories:
+
+    ./gen_dataset.py mydata --dur 5  --inpath ~/datasets/signaltrain/music/  --effect comp_4c --sp 10  
+
+
+
+### Training
 
     ./run_train.py --help 
 
