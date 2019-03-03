@@ -391,7 +391,8 @@ class Effect():
         print(f'Effect: {self.name}.  Knobs:')
         for i in range(len(self.knob_names)):
             print(f'                            {self.knob_names[i]}: {self.knob_ranges[i][0]} to {self.knob_ranges[i][1]}')
-
+        if self.is_inverse:
+            print("                            <<<< INVERSE EFFECT <<<<")
     # Effects should also define a 'go_wc' method which executes the effect, mapping input and knobs_nn to output y, x
     #   We return x as well as y, because some effects may reverse x & y (e.g. denoiser)
     def go_wc(self, x, knobs_wc):
@@ -536,7 +537,11 @@ class FileEffect(Effect):
         #TODO: note that use of 'eval' below could be a potential security issue
         self.knob_names = eval(config.get("effect","knob_names"))
         self.knob_ranges = np.array(eval(config.get("effect","knob_ranges")))
-
+        try:
+            self.is_inverse = (True == bool(config['effect']['inverse']) )
+            self.name = "De-"+self.name
+        except:
+            pass   # Ignore errors we don't require that 'inverse' be defined anywhere in the file
     def go_wc(self, x, knobs_w):
         return   # dummy op. there is no plugin to call; we're reading from files
 

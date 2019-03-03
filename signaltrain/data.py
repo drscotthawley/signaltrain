@@ -84,6 +84,9 @@ class AudioFileDataSet(Dataset):
             if ((i+1) % 100 == 0) or (i+1 == files_to_load):
                 print("\r       i = ",i+1,"/",files_to_load,sep="",end="")
             tmp_x, tmp_y, self.knobs[i] = self.read_one_new_file_pair(idx=i)
+            if self.effect.is_inverse:
+                tmp_x, tmp_y = tmp_y, tmp_x         # for effects that reverse 'input' and 'output' (for de-____ effects)
+
             x_len = min( tmp_x.shape[0], self.x.shape[1] )
             y_len = min( tmp_y.shape[0], self.y.shape[1] )
             self.x[i,0:x_len], self.y[i,0:y_len] = tmp_x[0:x_len], tmp_y[0:y_len] # only copy what we've allocated space for
