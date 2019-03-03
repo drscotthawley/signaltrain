@@ -37,10 +37,13 @@ if __name__ == "__main__":
     parser.add_argument('--path', help='Directory to pull input (and maybe target) data from (default: None, means only synthesized-on-the-fly data)', default=None)
     parser.add_argument('-n', '--num', type=int, help='Number of "data points" (audio clips) per epoch', default=200000)
     parser.add_argument('--sr', type=int, help='Sampling rate', default=44100)
-    parser.add_argument('--scale_factor', type=float, help='Scale factor (of input size & whole model)', default=1.0)
-    parser.add_argument('--shrink_factor', type=int, help='Shink output chunk relative to input by this divisor', default=4)
+    parser.add_argument('--scale', type=float, help='Scale factor (of input size & whole model)', default=1.0)
+    parser.add_argument('--shrink', type=int, help='Shink output chunk relative to input by this divisor', default=4)
     parser.add_argument('--synthprob', type=float, help="TODO: UNUSED. When input files present (in --path), probability of synthesizing fresh input signals too (ignored if no input files)", default=0.5)
     args = parser.parse_args()
+
+    # print command line as it was invoked (for reading nohup.out later)
+    print("Command line: "," ".join(sys.argv[:]))
 
     # Check arguments before beginning to train....
 
@@ -80,7 +83,7 @@ if __name__ == "__main__":
 
     # call the trianing routine
     st.train.train(epochs=args.epochs, n_data_points=args.num, batch_size=args.batch, device=device, sr=args.sr,\
-        effect=effect, datapath=args.path, scale_factor=args.scale_factor, shrink_factor=args.shrink_factor,
+        effect=effect, datapath=args.path, scale_factor=args.scale, shrink_factor=args.shrink,
         synth_prob=args.synthprob)
 
 # EOF

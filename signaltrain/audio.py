@@ -69,6 +69,17 @@ def undo_sliding_window(x, overlap):
 
 
 #--- List of test signals:
+def pinknoise(N):
+    """
+    Generates 1/f noise
+      N = length of array to generate
+    """
+    N_f = N //2 + 1
+    noise = 2*np.random.random(N_f)-1
+    s = np.sqrt(np.arange(len(noise)) + 1.)  # +1 avoids dividing by zero
+    y = (np.fft.irfft(noise / s)).real
+    return y/np.max(np.abs(y))  # normalize
+
 def randsine(t, randfunc=np.random.rand, amp_range=[0.2,0.9], freq_range=[5,150], n_tones=None, t0_fac=None):
     y = np.zeros(t.shape[0])
     if n_tones is None: n_tones=np.random.randint(1,3)
@@ -160,7 +171,7 @@ def triangle(t, randfunc=np.random.rand, t0_fac=None): # ramp up then down
     x[np.where(t < (t0-width))] = 0
     x[np.where(t > (t0+width))] = 0
     amp_n = (0.1*randfunc()+0.02)   # add noise
-    return x + amp_n*(2*np.random.random(t.shape[0])-1)
+    return x + amp_n*pinknoise(t.shape[0])
 
 
 def read_audio_file(filename, sr=44100, mono=True, norm=False, dtype=np.float32):
@@ -236,7 +247,7 @@ def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
     if 0 == chooser:                     # sine, with random phase, amp & freq
         return randsine(t, t0_fac=t0_fac)
     elif 1 == chooser:                  # noisy sine
-        return randsine(t,t0_fac=t0_fac) + 0.1*(2*np.random.rand(t.shape[0])-1)
+        return randsine(t,t0_fac=t0_fac) + 0.1*pinknoise(t.shape[0])
     elif 2 == chooser:                    #  "pluck", decaying sine wave
         return pluck(t,t0_fac=t0_fac)
     elif 3 == chooser:                   # ramp up then down
@@ -246,10 +257,10 @@ def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
     elif 5 == chooser:                 # "bunch of spikes"
         return spikes(t)
     elif 6 == chooser:                # noisy box
-        return box(t,t0_fac=t0_fac) * (2*np.random.rand(t.shape[0])-1)
+        return box(t,t0_fac=t0_fac) * pinknoise(t.shape[0])
     elif 7 == chooser:                # noisy 'pluck'
         amp_n = (0.3*randfunc()+0.1)
-        return pluck(t,t0_fac=t0_fac) + amp_n*(2*np.random.random(t.shape[0])-1)  #noise centered around 0
+        return pluck(t,t0_fac=t0_fac) + amp_n*pinknoise(t.shape[0])  #noise centered around 0
     elif 8 == chooser:
         return ampexpstepup(t, start_dB=-30) # increasing amplitude-steps of sine wave
     elif 9 == chooser:
@@ -258,7 +269,7 @@ def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
         return sweep(t, freq_range=[f_low, f_high], amp_too=amp_too)
     elif 10 == chooser:                  # just white noise
         amp_n = (0.6*randfunc()+0.2)
-        return amp_n*(2*np.random.rand(t.shape[0])-1)
+        return amp_n*pinknoise(t.shape[0])
     else:
         return 0.5*(synth_input_sample(t)+synth_input_sample(t)) # superposition of the above
 #---- End test signals
@@ -521,7 +532,6 @@ class FileEffect(Effect):
         # read the effect info config file  "effect_info.ini"
         config = configparser.ConfigParser()
         config.read(path+'/effect_info.ini')
-        print(config.sections())
         self.name = config['effect']['name']+"(files)"   # tack on "(files)" to the effect name
         #TODO: note that use of 'eval' below could be a potential security issue
         self.knob_names = eval(config.get("effect","knob_names"))

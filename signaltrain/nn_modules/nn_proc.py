@@ -185,7 +185,7 @@ class st_model(nn.Module):
         self.num_knobs = num_knobs
 
         print("Input chunk size =",chunk_size)
-        print("Output chunk size =",out_chunk_size)
+        print("Intended Output chunk size =",out_chunk_size)
         print("Sample rate =",sr)
 
         # Analysis parameters
@@ -194,8 +194,10 @@ class st_model(nn.Module):
         expected_time_frames = int(np.ceil(chunk_size/float(hop_size)) + np.ceil(ft_size/float(hop_size)))
         output_time_frames = int(np.ceil(out_chunk_size/float(hop_size)) + np.ceil(ft_size/float(hop_size)))
         y_size = (output_time_frames-1)*hop_size - ft_size
-        assert y_size == out_chunk_size, f"Error: ysize ({ysize}) should equal out_chunk_size ({out_chunk_size})"
-
+        if y_size != out_chunk_size:
+            print(f"Warning: y_size ({y_size}) should equal out_chunk_size ({out_chunk_size})")
+            print(f"    Setting out_chunk_size = y_size = {y_size}")
+        self.out_chunk_size = y_size
         self.mpaec = AsymMPAEC(expected_time_frames, ft_size=ft_size, hop_size=hop_size, n_knobs=num_knobs, output_tf=output_time_frames)
 
     def clip_grad_norm_(self):
