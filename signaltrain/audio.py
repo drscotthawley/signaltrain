@@ -268,7 +268,7 @@ def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
         return pluck(t,t0_fac=t0_fac) + amp_n*pinknoise(t.shape[0])  #noise centered around 0
     elif 8 == chooser:
         return ampexpstepup(t, start_dB=-30) # increasing amplitude-steps of sine wave
-    elif 9 == chooser:
+    elif 9 == chooser:                       # freq sweep 
         f_low, f_high  = np.random.randint(20,1000), np.random.randint(1000,20000)
         amp_too = np.random.choice([False,False,True])
         return sweep(t, freq_range=[f_low, f_high], amp_too=amp_too)
@@ -312,7 +312,7 @@ def my_clip_min(x, clip_min):  # does the work of np.clip(), which numba doesn't
     return x
 
 @jit(nopython=True)
-def compressor_4controls(x, thresh=-24.0, ratio=2.0, attackTime=0.01,releaseTime=0.01, sr=44100.0, dtype=np.float32):
+def compressor_4controls(x, thresh=-24.0, ratio=2.0, attackTime=0.01, releaseTime=0.01, sr=44100.0, dtype=np.float32):
     """
     Thanks to Eric Tarr for MATLAB code for this, p. 428 of Hack Audio book.
     SHH mods for Python:
@@ -321,8 +321,8 @@ def compressor_4controls(x, thresh=-24.0, ratio=2.0, attackTime=0.01,releaseTime
       x: input signal
       sr: sample rate in Hz
       thresh: threhold in dB
-      ratio: ratio (ratio:1)
-      attackTime, releasTime: in seconds
+      ratio: ratio (should be >=1 , i.e. ratio:1)
+      attackTime, releaseTime: in seconds
       dtype: typical numpy datatype
     """
     N = len(x)
