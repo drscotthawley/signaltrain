@@ -8,9 +8,6 @@ These routines replicate functionality in FastAI library, i.e. the 1cycle LR sch
 # imports
 import numpy as np
 import torch
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pylab as plt
 
 
 def get_1cycle_schedule(lr_max = 1e-3, n_data_points = 8000, epochs = 200,
@@ -80,6 +77,7 @@ if __name__ == "__main__":
     sys.path.append('..')       # not something you want for generic import of this code, i.e. not up at the top of this code
     from nn_modules import nn_proc
     from losses import loss_functions
+    import matplotlib.pylab as plt
 
     np.random.seed(218)
     torch.manual_seed(218)

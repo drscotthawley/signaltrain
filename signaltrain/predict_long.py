@@ -11,21 +11,21 @@ import sys
 sys.path.append('..')
 import signaltrain as st
 
-def predict_long(signal, knobs_nn, model, chunk_size, out_chunk_size, sr=44100, effect=None):
+def predict_long(signal, knobs_nn, model, chunk_size, out_chunk_size, sr=44100, effect=None, device="cpu:0"):
 
     # reshape input and knobs.  break signal up into overlapping windows
     overlap = chunk_size-out_chunk_size
-    print("overlap = ",overlap)
+    #print("overlap = ",overlap)
     x = st.audio.sliding_window(signal, chunk_size, overlap=overlap)
     knobs = np.tile(knobs_nn, (x.shape[0],1))     # repeat knob settings a bunch of times
 
     # Move data to torch device
-    x, knobs = torch.Tensor(x.astype(np.float32)), torch.Tensor(knobs.astype(np.float32))
-    print("x.size() =",x.size(), ", knobs.size() =",knobs.size() )
-    x_cuda, knobs_cuda = x.to(device),  knobs.to(device)
+    x_torch = torch.Tensor(x.astype(np.float32)).to(device)
+    knobs_torch = torch.Tensor(knobs.astype(np.float32)).to(device)
+    #print("x_torch.size() =",x_torch.size(), ", knobs_torch.size() =",knobs_torch.size() )
 
     # Do the model prediction
-    y_hat, mag, mag_hat = model.forward(x_cuda, knobs_cuda)
+    y_hat, mag, mag_hat = model.forward(x_torch, knobs_torch)
 
     # Reassemble the output into one long signal
     y_pred = y_hat.cpu().detach().numpy().flatten().astype(np.float32)
@@ -34,6 +34,7 @@ def predict_long(signal, knobs_nn, model, chunk_size, out_chunk_size, sr=44100, 
 
 
 if __name__ == "__main__":
+    ## Can be run as standalone app for testing / eval purposes
     import os
     import argparse
     from signaltrain.nn_modules import nn_proc
@@ -87,19 +88,18 @@ if __name__ == "__main__":
     # convert to NN parameters for knobs
     kr = np.array(knob_ranges)
     knobs_nn = (knobs_wc - kr[:,0])/(kr[:,1]-kr[:,0]) - 0.5
-    print("knobs_nn =",knobs_nn,", knobs_wc =",knobs_wc)
-    #knobs_nn = np.random.rand(num_knobs)-0.5   # just pick some random setting
-    #knobs_nn[0] = -0.45  # crank down the threshold for testing
 
     # Generate Target audio
     do_target = (args.effect != '')
     if do_target and (args.effect == 'comp_4c'):
         effect = st.audio.Compressor_4c()  # TODO: this should not be hard-coded
         y, _ = effect.go(signal, knobs_nn)
+    else:
+        print("Warning: only comp_4c effect is implemented now. Skipping target generation.")
 
     # Call the predict_long routine
     print("\nCalling predict_long()...")
-    y_pred = predict_long(signal, knobs_nn, model, chunk_size, out_chunk_size, sr=sr)
+    y_pred = predict_long(signal, knobs_nn, model, chunk_size, out_chunk_size, sr=sr, device=device)
 
     print("\n...Back. Output y_pred.shape = ",y_pred.shape)
 

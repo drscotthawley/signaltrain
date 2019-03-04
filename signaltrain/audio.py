@@ -91,16 +91,21 @@ def randsine(t, randfunc=np.random.rand, amp_range=[0.2,0.9], freq_range=[5,150]
     return y
 
 def box(t, randfunc=np.random.rand, t0_fac=None):
-    height_low, height_high = 0.3*randfunc()+0.1, 0.35*randfunc() + 0.6
+    """
+    classic "box"-shaped step response
+    t0_fac: specifies faction of total length at which to start at (otherwise random)
+    """
+    height_bgn, height_mid, height_end = 0.15*randfunc(), 0.35*randfunc()+0.6, 0.2*randfunc()+0.1
     maxi = len(t)
-    delta = 1    # 1 is an immediate step response
-    #delta += maxi//100     # slope the sides slightly
+    delta = np.random.choice([0, np.random.randint(100) ])  # maybe slope the sides ; delta=0 is an immediate step response
     i_up = delta+int( 0.3*randfunc() * maxi) if t0_fac is None else int(t0_fac*maxi)
     i_dn = min( i_up + int( (0.3+0.35*randfunc())*maxi), maxi-delta-1)   # time for jumping back down
-    x = height_low*np.ones(t.shape[0]).astype(t.dtype)  # noise of unit amplitude
-    x[i_up:i_dn] = height_high
-    x[i_up-delta:i_up+delta] = height_low + (height_high-height_low)*(np.arange(2*delta))/2/delta
-    x[i_dn-delta:i_dn+delta] = height_high - (height_high-height_low)*(np.arange(2*delta))/2/delta
+    x = height_end*np.ones(t.shape[0]).astype(t.dtype)  # unit amplitude
+    x[0:i_up-1] = height_bgn
+    x[i_up:i_dn] = height_mid
+    if delta > 0:
+        x[i_up-delta:i_up+delta] = height_bgn + (height_mid-height_bgn)*(np.arange(2*delta))/2/delta
+        x[i_dn-delta:i_dn+delta] = height_mid - (height_mid-height_end)*(np.arange(2*delta))/2/delta
     return x
 
 def expdecay(t, randfunc=np.random.rand, t0_fac=None, high_fac=None, low_fac=None):
@@ -267,7 +272,7 @@ def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
         f_low, f_high  = np.random.randint(20,1000), np.random.randint(1000,20000)
         amp_too = np.random.choice([False,False,True])
         return sweep(t, freq_range=[f_low, f_high], amp_too=amp_too)
-    elif 10 == chooser:                  # just white noise
+    elif 10 == chooser:                  # just noise
         amp_n = (0.6*randfunc()+0.2)
         return amp_n*pinknoise(t.shape[0])
     else:
@@ -309,7 +314,9 @@ def my_clip_min(x, clip_min):  # does the work of np.clip(), which numba doesn't
 @jit(nopython=True)
 def compressor_4controls(x, thresh=-24.0, ratio=2.0, attackTime=0.01,releaseTime=0.01, sr=44100.0, dtype=np.float32):
     """
-    (Minimizing the for loop, removing dummy variables, and invoking numba @autojit made this "fast")
+    Thanks to Eric Tarr for MATLAB code for this, p. 428 of Hack Audio book.
+    SHH mods for Python:
+        Minimized the for loop, removed dummy variables, and invoked numba @jit to make this "fast"
     Inputs:
       x: input signal
       sr: sample rate in Hz
@@ -339,7 +346,7 @@ def compressor_4controls(x, thresh=-24.0, ratio=2.0, attackTime=0.01,releaseTime
     i = np.where(x_dB > thresh)
     gainChange_dB[i] =  thresh + (x_dB[i] - thresh)/ratio - x_dB[i] # Perform Downwards Compression
 
-    for n in range(x_dB.shape[0]):   # this loop is slow but unavoidable if alphaA != alphaR. @autojit makes it fast.
+    for n in range(x_dB.shape[0]):   # this loop is slow but unavoidable if alphaA != alphaR. @autojit makes it fast(er).
         # smooth over the gainChange
         if gainChange_dB[n] < lin_A[n-1]:
             lin_A[n] = ((1-alphaA)*gainChange_dB[n]) +(alphaA*lin_A[n-1]) # attack mode
