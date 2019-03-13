@@ -91,7 +91,8 @@ def gen_one_io_pair(name, t, x, sr, effect, settings_per, log_interval, infile_l
         num_clips = x.shape[0] // clip_length
         for clip_i in range(num_clips):
             ibgn, iend = clip_i * clip_length, (clip_i+1)*clip_length
-            chooser = np.random.choice([0,1,2,4,6,7,8,9])
+            chooser = np.random.choice([0,1,2,4,6,7,8,9])   # skipping 5="bunch of spikes"
+
             # added conditional normalization, to avoid any possible rescaling errors during training later
             tmp = st.audio.synth_input_sample(t, chooser)
             x[ibgn:iend] = tmp

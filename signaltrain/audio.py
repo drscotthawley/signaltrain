@@ -69,6 +69,17 @@ def undo_sliding_window(x, overlap):
 
 
 #--- List of test signals:
+def pinknoise(N):
+    """
+    Generates 1/f noise
+      N = length of array to generate
+    """
+    N_f = N //2 + 1
+    noise = 2*np.random.random(N_f)-1
+    s = np.sqrt(np.arange(len(noise)) + 1.)  # +1 avoids dividing by zero
+    y = (np.fft.irfft(noise / s)).real
+    return y/np.max(np.abs(y))  # normalize
+
 def randsine(t, randfunc=np.random.rand, amp_range=[0.2,0.9], freq_range=[5,150], n_tones=None, t0_fac=None):
     y = np.zeros(t.shape[0])
     if n_tones is None: n_tones=np.random.randint(1,3)
@@ -80,16 +91,21 @@ def randsine(t, randfunc=np.random.rand, amp_range=[0.2,0.9], freq_range=[5,150]
     return y
 
 def box(t, randfunc=np.random.rand, t0_fac=None):
-    height_low, height_high = 0.3*randfunc()+0.1, 0.35*randfunc() + 0.6
+    """
+    classic "box"-shaped step response
+    t0_fac: specifies faction of total length at which to start at (otherwise random)
+    """
+    height_bgn, height_mid, height_end = 0.15*randfunc(), 0.35*randfunc()+0.6, 0.2*randfunc()+0.1
     maxi = len(t)
-    delta = 1    # 1 is an immediate step response
-    #delta += maxi//100     # slope the sides slightly
+    delta = np.random.choice([0, np.random.randint(100) ])  # maybe slope the sides ; delta=0 is an immediate step response
     i_up = delta+int( 0.3*randfunc() * maxi) if t0_fac is None else int(t0_fac*maxi)
     i_dn = min( i_up + int( (0.3+0.35*randfunc())*maxi), maxi-delta-1)   # time for jumping back down
-    x = height_low*np.ones(t.shape[0]).astype(t.dtype)  # noise of unit amplitude
-    x[i_up:i_dn] = height_high
-    x[i_up-delta:i_up+delta] = height_low + (height_high-height_low)*(np.arange(2*delta))/2/delta
-    x[i_dn-delta:i_dn+delta] = height_high - (height_high-height_low)*(np.arange(2*delta))/2/delta
+    x = height_end*np.ones(t.shape[0]).astype(t.dtype)  # unit amplitude
+    x[0:i_up-1] = height_bgn
+    x[i_up:i_dn] = height_mid
+    if delta > 0:
+        x[i_up-delta:i_up+delta] = height_bgn + (height_mid-height_bgn)*(np.arange(2*delta))/2/delta
+        x[i_dn-delta:i_dn+delta] = height_mid - (height_mid-height_end)*(np.arange(2*delta))/2/delta
     return x
 
 def expdecay(t, randfunc=np.random.rand, t0_fac=None, high_fac=None, low_fac=None):
@@ -160,7 +176,7 @@ def triangle(t, randfunc=np.random.rand, t0_fac=None): # ramp up then down
     x[np.where(t < (t0-width))] = 0
     x[np.where(t > (t0+width))] = 0
     amp_n = (0.1*randfunc()+0.02)   # add noise
-    return x + amp_n*(2*np.random.random(t.shape[0])-1)
+    return x + amp_n*pinknoise(t.shape[0])
 
 
 def read_audio_file(filename, sr=44100, mono=True, norm=False, dtype=np.float32):
@@ -236,7 +252,7 @@ def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
     if 0 == chooser:                     # sine, with random phase, amp & freq
         return randsine(t, t0_fac=t0_fac)
     elif 1 == chooser:                  # noisy sine
-        return randsine(t,t0_fac=t0_fac) + 0.1*(2*np.random.rand(t.shape[0])-1)
+        return randsine(t,t0_fac=t0_fac) + 0.1*pinknoise(t.shape[0])
     elif 2 == chooser:                    #  "pluck", decaying sine wave
         return pluck(t,t0_fac=t0_fac)
     elif 3 == chooser:                   # ramp up then down
@@ -246,19 +262,19 @@ def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
     elif 5 == chooser:                 # "bunch of spikes"
         return spikes(t)
     elif 6 == chooser:                # noisy box
-        return box(t,t0_fac=t0_fac) * (2*np.random.rand(t.shape[0])-1)
+        return box(t,t0_fac=t0_fac) * pinknoise(t.shape[0])
     elif 7 == chooser:                # noisy 'pluck'
         amp_n = (0.3*randfunc()+0.1)
-        return pluck(t,t0_fac=t0_fac) + amp_n*(2*np.random.random(t.shape[0])-1)  #noise centered around 0
+        return pluck(t,t0_fac=t0_fac) + amp_n*pinknoise(t.shape[0])  #noise centered around 0
     elif 8 == chooser:
         return ampexpstepup(t, start_dB=-30) # increasing amplitude-steps of sine wave
-    elif 9 == chooser:
+    elif 9 == chooser:                       # freq sweep 
         f_low, f_high  = np.random.randint(20,1000), np.random.randint(1000,20000)
         amp_too = np.random.choice([False,False,True])
         return sweep(t, freq_range=[f_low, f_high], amp_too=amp_too)
-    elif 10 == chooser:                  # just white noise
+    elif 10 == chooser:                  # just noise
         amp_n = (0.6*randfunc()+0.2)
-        return amp_n*(2*np.random.rand(t.shape[0])-1)
+        return amp_n*pinknoise(t.shape[0])
     else:
         return 0.5*(synth_input_sample(t)+synth_input_sample(t)) # superposition of the above
 #---- End test signals
@@ -296,15 +312,17 @@ def my_clip_min(x, clip_min):  # does the work of np.clip(), which numba doesn't
     return x
 
 @jit(nopython=True)
-def compressor_4controls(x, thresh=-24.0, ratio=2.0, attackTime=0.01,releaseTime=0.01, sr=44100.0, dtype=np.float32):
+def compressor_4controls(x, thresh=-24.0, ratio=2.0, attackTime=0.01, releaseTime=0.01, sr=44100.0, dtype=np.float32):
     """
-    (Minimizing the for loop, removing dummy variables, and invoking numba @autojit made this "fast")
+    Thanks to Eric Tarr for MATLAB code for this, p. 428 of Hack Audio book.
+    SHH mods for Python:
+        Minimized the for loop, removed dummy variables, and invoked numba @jit to make this "fast"
     Inputs:
       x: input signal
       sr: sample rate in Hz
       thresh: threhold in dB
-      ratio: ratio (ratio:1)
-      attackTime, releasTime: in seconds
+      ratio: ratio (should be >=1 , i.e. ratio:1)
+      attackTime, releaseTime: in seconds
       dtype: typical numpy datatype
     """
     N = len(x)
@@ -328,7 +346,7 @@ def compressor_4controls(x, thresh=-24.0, ratio=2.0, attackTime=0.01,releaseTime
     i = np.where(x_dB > thresh)
     gainChange_dB[i] =  thresh + (x_dB[i] - thresh)/ratio - x_dB[i] # Perform Downwards Compression
 
-    for n in range(x_dB.shape[0]):   # this loop is slow but unavoidable if alphaA != alphaR. @autojit makes it fast.
+    for n in range(x_dB.shape[0]):   # this loop is slow but unavoidable if alphaA != alphaR. @autojit makes it fast(er).
         # smooth over the gainChange
         if gainChange_dB[n] < lin_A[n-1]:
             lin_A[n] = ((1-alphaA)*gainChange_dB[n]) +(alphaA*lin_A[n-1]) # attack mode
@@ -380,7 +398,8 @@ class Effect():
         print(f'Effect: {self.name}.  Knobs:')
         for i in range(len(self.knob_names)):
             print(f'                            {self.knob_names[i]}: {self.knob_ranges[i][0]} to {self.knob_ranges[i][1]}')
-
+        if self.is_inverse:
+            print("                            <<<< INVERSE EFFECT <<<<")
     # Effects should also define a 'go_wc' method which executes the effect, mapping input and knobs_nn to output y, x
     #   We return x as well as y, because some effects may reverse x & y (e.g. denoiser)
     def go_wc(self, x, knobs_wc):
@@ -521,12 +540,15 @@ class FileEffect(Effect):
         # read the effect info config file  "effect_info.ini"
         config = configparser.ConfigParser()
         config.read(path+'/effect_info.ini')
-        print(config.sections())
         self.name = config['effect']['name']+"(files)"   # tack on "(files)" to the effect name
         #TODO: note that use of 'eval' below could be a potential security issue
         self.knob_names = eval(config.get("effect","knob_names"))
         self.knob_ranges = np.array(eval(config.get("effect","knob_ranges")))
-
+        try:
+            self.is_inverse = (True == bool(config['effect']['inverse']) )
+            self.name = "De-"+self.name
+        except:
+            pass   # Ignore errors we don't require that 'inverse' be defined anywhere in the file
     def go_wc(self, x, knobs_w):
         return   # dummy op. there is no plugin to call; we're reading from files
 

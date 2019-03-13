@@ -84,6 +84,9 @@ class AudioFileDataSet(Dataset):
             if ((i+1) % 100 == 0) or (i+1 == files_to_load):
                 print("\r       i = ",i+1,"/",files_to_load,sep="",end="")
             tmp_x, tmp_y, self.knobs[i] = self.read_one_new_file_pair(idx=i)
+            if self.effect.is_inverse:
+                tmp_x, tmp_y = tmp_y, tmp_x         # for effects that reverse 'input' and 'output' (for de-____ effects)
+
             x_len = min( tmp_x.shape[0], self.x.shape[1] )
             y_len = min( tmp_y.shape[0], self.y.shape[1] )
             self.x[i,0:x_len], self.y[i,0:y_len] = tmp_x[0:x_len], tmp_y[0:y_len] # only copy what we've allocated space for
@@ -200,7 +203,7 @@ class SynthAudioDataSet(Dataset):
     To prevent this, one can pass the DataLoader a worker_init_fn that sets the random seed.
        See https://pytorch.org/docs/stable/notes/faq.html#dataloader-workers-random-seed
     """
-    def __init__(self, chunk_size,  effect, sr=44100, datapoints=8000, dtype=np.float32, recycle=False):
+    def __init__(self, chunk_size,  effect, sr=44100, datapoints=8000, dtype=np.float32, recycle=False, y_size=None):
         super(SynthAudioDataSet, self).__init__()
         self.chunk_size = chunk_size
         self.effect = effect
@@ -209,14 +212,17 @@ class SynthAudioDataSet(Dataset):
         self.dtype = dtype
         self.recycle = recycle
         self.num_knobs = len(effect.knob_names)
+        self.y_size = chunk_size if (y_size is None) else y_size
 
         # preallocate an array of time values across one chunk for use with audio synth functions
         self.t = np.arange(chunk_size, dtype=np.float32) / sr
 
+        print("SynthAudioDataSet: synthetic/generated data")
+
         if recycle:  # keep the same data over & over (Useful for monitoring Validation set)
             print("Setting up recycling (static data) for this dataset. This may take a short while...")
             self.x = np.zeros((datapoints,chunk_size), dtype=self.dtype)
-            self.y = np.zeros((datapoints,chunk_size), dtype=self.dtype)
+            self.y = np.zeros((datapoints,self.y_size ), dtype=self.dtype)
             self.knobs = np.zeros((datapoints, self.num_knobs), dtype=self.dtype)
             for i in range(datapoints):
                 self.x[i], self.y[i], self.knobs[i] = self.gen_single_chunk()
@@ -230,7 +236,7 @@ class SynthAudioDataSet(Dataset):
             return self.x[idx], self.y[idx], self.knobs[idx]
 
         x, y, knobs = self.gen_single_chunk()
-        return x.astype(self.dtype)[-self.chunk_size:], y[-self.chunk_size:], knobs.astype(self.dtype)
+        return x.astype(self.dtype)[-self.chunk_size:], y[-self.y_size:], knobs.astype(self.dtype)
 
     def gen_single_chunk(self, chooser=None, knobs=None):
         """
@@ -246,6 +252,8 @@ class SynthAudioDataSet(Dataset):
             knobs = audio.random_ends(len(self.effect.knob_ranges))-0.5  # inputs to NN, zero-mean...except we emphasize the ends slightly
 
         y, x = self.effect.go(x, knobs)   # Apply the audio effect
+
+        y = y[-self.y_size:]    # shrink output size
 
         return x, y, knobs
 

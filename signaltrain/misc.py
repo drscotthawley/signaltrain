@@ -23,13 +23,14 @@ def save_checkpoint(checkpointname, model, epoch, parallel, optimizer, effect, s
     Saves a dictionary to a tar file. Package it with model state_dict and run parameters
     """
     print(f'\nsaving model to {checkpointname}',end="")
-    state_dict = model.module.state_dict() if parallel else model.state_dict()
+    model2save = model.module  if parallel else model
+    state_dict = model2save.state_dict()
     state = {'epoch': epoch + 1, 'state_dict':  state_dict,
         'optimizer': optimizer.state_dict(),
         'effect_name': effect.name,
         'knob_names': effect.knob_names, 'knob_ranges': effect.knob_ranges,
-        'scale_factor': model.scale_factor, 'shrink_factor': model.shrink_factor,
-        'in_chunk_size': model.in_chunk_size,'out_chunk_size': model.out_chunk_size,
+        'scale_factor': model2save.scale_factor, 'shrink_factor': model2save.shrink_factor,
+        'in_chunk_size': model2save.in_chunk_size,'out_chunk_size': model2save.out_chunk_size,
         'sr': sr}
     torch.save(state, checkpointname)
 

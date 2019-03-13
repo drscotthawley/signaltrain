@@ -33,7 +33,7 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
     """
 
     # print info about this training run
-    print(f'SignalTrain training execution began at {time.time()}. Options:')
+    print(f'SignalTrain training execution began at {time.ctime()}. Options:')
     print(f'    epochs = {epochs}, n_data_points = {n_data_points}, batch_size = {batch_size}')
     print(f'    scale_factor = {scale_factor}, shrink_factor = {shrink_factor}')
     num_knobs = len(effect.knob_names)
@@ -79,11 +79,13 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
 
     # Copy model to (other) GPU if possbible
     parallel = torch.cuda.device_count() > 1
-    if parallel:       # For Hawley's 2 GPUs this cuts execution time down by ~30% (not 50%)
+    if parallel:       # For Hawley's 2 Titan X GPUs this typically cuts execution time down by ~30% (not 50%)
         print("Replicating NN model for data-parallel execution across", torch.cuda.device_count(), "GPUs")
         model = nn.DataParallel(model)
     model.to(device)             # put the model on the GPU if it wasn't already
 
+    # Set up for using additional L1 regularization - scale by frequency bin
+    scale_by_freq = None
 
     # Setup log file
     logfilename = "vl_avg_out.dat"   # Val Loss, average, output
@@ -109,7 +111,14 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
 
             # feed-forward synthesis
             y_hat, mag, mag_hat = model.forward(x_cuda, knobs_cuda)
-            loss = loss_functions.calc_loss(y_hat, y_cuda, mag_hat)
+
+            # set up loss weighting
+            if scale_by_freq is None:
+                expfac = 7./mag_hat.size()[-1]   # exponential L1 loss scaling by ~1000 times (30dB) over freq range
+                scale_by_freq = torch.exp(expfac* torch.arange(0., mag_hat.size()[-1])).expand_as(mag_hat)
+
+            # loss evaluation
+            loss = loss_functions.calc_loss(y_hat, y_cuda, mag_hat, scale_by_freq=scale_by_freq)
 
             # Status message
             batch_num += 1
@@ -158,7 +167,7 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
             print("\nSaving sample data plots",end="")
             io_methods.plot_valdata(x_val_cuda, knobs_val_cuda, y_val_cuda, y_val_hat, effect, epoch, loss_val, target_size=y_size)
 
-        if ((epoch+1) % 50 == 0) or (epoch == epochs-1):    # write out spectrogams from time to time
+        if ((epoch+1) % 20 == 0) or (epoch == epochs-1):    # write out spectrograms from time to time
             io_methods.plot_spectrograms(model, mag_val, mag_val_hat)
 
         # save checkpoint of model to file, which can be loaded later
