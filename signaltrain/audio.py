@@ -102,7 +102,7 @@ def box(t, randfunc=np.random.rand, t0_fac=None):
     i_dn = min( i_up + int( (0.3+0.35*randfunc())*maxi), maxi-delta-1)   # time for jumping back down
     x = height_end*np.ones(t.shape[0]).astype(t.dtype)  # unit amplitude
     x[0:i_up-1] = height_bgn
-    x[i_up:i_dn] = height_mid
+    x[i_up:i_dn] = height_mid    # the "flat top" middle area of the box
     if delta > 0:
         x[i_up-delta:i_up+delta] = height_bgn + (height_mid-height_bgn)*(np.arange(2*delta))/2/delta
         x[i_dn-delta:i_dn+delta] = height_mid - (height_mid-height_end)*(np.arange(2*delta))/2/delta
@@ -196,11 +196,13 @@ def read_audio_file(filename, sr=44100, mono=True, norm=False, dtype=np.float32)
     sr, signal = wavfile.read(filename)      # scipy works fine and is fast
     if mono and (len(signal.shape) > 1):     # convert to mono
         signal = signal[:,0]
-    if norm:
-        signal = signal/np.max(np.abs(signal))
 
     if isinstance(signal[0], np.int16): # but some files are ints and should be floats (this conversion slows things down)
         signal = np.array(signal, dtype=dtype)/32767.0   # change from [-32767..32767] to [-1..1]
+
+    if norm:
+        signal = signal/np.max(np.abs(signal))
+
 
     return signal, sr
 
@@ -252,7 +254,7 @@ def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
     if 0 == chooser:                     # sine, with random phase, amp & freq
         return randsine(t, t0_fac=t0_fac)
     elif 1 == chooser:                  # noisy sine
-        return randsine(t,t0_fac=t0_fac) + 0.1*pinknoise(t.shape[0])
+        return randsine(t,t0_fac=t0_fac) + 0.2*np.random.rand()*pinknoise(t.shape[0]) + 0.2*np.random.rand()*(2*np.random.rand(t.shape[0])-1)
     elif 2 == chooser:                    #  "pluck", decaying sine wave
         return pluck(t,t0_fac=t0_fac)
     elif 3 == chooser:                   # ramp up then down
@@ -262,13 +264,13 @@ def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
     elif 5 == chooser:                 # "bunch of spikes"
         return spikes(t)
     elif 6 == chooser:                # noisy box
-        return box(t,t0_fac=t0_fac) * pinknoise(t.shape[0])
+        return box(t,t0_fac=t0_fac) * (2*np.random.rand(t.shape[0])-1) # don't use pinknoise here
     elif 7 == chooser:                # noisy 'pluck'
         amp_n = (0.3*randfunc()+0.1)
-        return pluck(t,t0_fac=t0_fac) + amp_n*pinknoise(t.shape[0])  #noise centered around 0
+        return pluck(t,t0_fac=t0_fac) + amp_n*pinknoise(t.shape[0])
     elif 8 == chooser:
         return ampexpstepup(t, start_dB=-30) # increasing amplitude-steps of sine wave
-    elif 9 == chooser:                       # freq sweep 
+    elif 9 == chooser:                       # freq sweep
         f_low, f_high  = np.random.randint(20,1000), np.random.randint(1000,20000)
         amp_too = np.random.choice([False,False,True])
         return sweep(t, freq_range=[f_low, f_high], amp_too=amp_too)
