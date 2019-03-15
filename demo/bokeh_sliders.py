@@ -24,7 +24,7 @@ else:
     torch.set_default_tensor_type('torch.FloatTensor')
 
 
-# default data settings
+# default global data settings (overwritten below)
 chunk_size = 8192*2
 sr = 44100
 
@@ -50,7 +50,7 @@ def get_input_sample(chooser, in_chunk_size=8192):
 
 
 def torch_chunkify(x, chunk_size=chunk_size):
-    # pads x with zeros and returns a 2D array
+    # For long signals.  pads x with zeros and returns a 2D array
     '''
     rows = int(np.ceil(x.shape[0]/chunk_size))  # this will be the batch size
     nearest_mult = rows*(chunk_size)
@@ -63,26 +63,30 @@ def torch_chunkify(x, chunk_size=chunk_size):
     return x_torch
 
 
-
-# Set up effect(s)
+# Set up effect(s). written generally so we can add other effects later
 effects_dict = dict()
-effects_dict['comp_4c'] = {'effect':st.audio.Compressor_4c(), 'checkpoint':'modelcheckpoint_16k8k_comp4c.tar'}
-effects_dict['denoise'] = {'effect':st.audio.Denoise(), 'checkpoint':'modelcheckpoint_denoise.tar'}
+effects_dict['comp_4c'] = {'effect':st.audio.Compressor_4c(), 'checkpoint':'outmodel.tar'}
+#effects_dict['denoise'] = {'effect':st.audio.Denoise(), 'checkpoint':'modelcheckpoint_denoise.tar'}
 shortname = 'comp_4c'
 effect = effects_dict[shortname]['effect']
+
+# read and parse the checkpoint file
 checkpoint_file = effects_dict[shortname]['checkpoint']
-num_knobs = len(effect.knob_names)
-knobranges = effect.knob_ranges
-knobs_wc = np.array([knobranges[k][0] for k in range(num_knobs)])
+state_dict, rv = st.misc.load_checkpoint(checkpoint_file, fatal=True, device="cpu")
+scale_factor = rv['scale_factor']
+shrink_factor = rv['shrink_factor']
+knob_names = rv['knob_names']
+knob_ranges = np.array(rv['knob_ranges'])
+num_knobs = len(knob_names)
+sr = rv['sr']
 
 # set up model
-model = nn_proc.st_model(scale_factor=2, shrink_factor=2, num_knobs=num_knobs, sr=sr)
+model = nn_proc.st_model(scale_factor=scale_factor, shrink_factor=shrink_factor, num_knobs=num_knobs, sr=sr)
+model.load_state_dict(state_dict)  # overwrite weights using checkpoint info
 chunk_size, out_chunk_size = model.in_chunk_size, model.out_chunk_size
-state_dict, rv = st.misc.load_checkpoint(checkpoint_file, fatal=True, device="cpu")
-if state_dict != {}:
-    model.load_state_dict(state_dict)
 
 
+#---------  Initial data for the plot.  this will all need to be updated later...
 # input signal
 chooser = "box"
 show_size = chunk_size//2
@@ -90,19 +94,18 @@ x = get_input_sample(chooser, in_chunk_size=show_size)
 x = np.concatenate( (np.zeros(len(x)),x))  # double it and add zeros
 
 # target output
+knobs_wc = knob_ranges.mean(axis=1)
 y, x = effect.go_wc(x, knobs_wc)
 
-# predicted output
-# use the same knob settings for all chunks
+# predicted output.     use the same knob settings for all chunks
 x_torch = torch_chunkify(x)   # break up input audio into chunks
-knobs_nn = (knobs_wc - knobranges[:,0])/(knobranges[:,1]-knobranges[:,0]) - 0.5
+knobs_nn = (knobs_wc - knob_ranges[:,0])/(knob_ranges[:,1]-knob_ranges[:,0]) - 0.5
 knobs = knobs_nn# np.array([thresh_nn, ratio_nn, attack_nn])
 rows = x_torch.size()[0]
 knobs = np.tile(knobs,(rows,1))
 knobs_torch = torch.autograd.Variable(torch.from_numpy(knobs).to(device), requires_grad=False).float()
 y_pred_torch, mag, mag_hat = model.forward(x_torch, knobs_torch)
 y_pred = y_pred_torch.data.cpu().numpy().flatten()[0:t.shape[0]]  #flattened numpy version
-
 
 
 
@@ -160,6 +163,8 @@ def update_data(attrname, old, new):
 
 
 def update_effect(attrname, old, new):
+    print("Nope, this isn't enabled yet")
+    return False
     shortname = effect_select.value
     effect = effects_dict[shortname]['effect']
     checkpoint_file = effects_dict[shortname]['checkpoint']
@@ -175,15 +180,14 @@ def update_input(attrname, old, new):
     source.data = dict(x=t[-show_size:], y=x[-show_size:])
     update_data(attrname, old, new)
 
+# watch for changes and call callbacks
 input_select.on_change('value', update_input)
 effect_select.on_change('value', update_effect)
 for w in knob_sliders:
     w.on_change('value', update_data)
 
 
-
 # Set up layouts and add to document
 inputs = column([effect_select, input_select]+knob_sliders )
-
 curdoc().add_root(row(inputs, plot, width=800))
-curdoc().title = "Sliders"
+curdoc().title = "SignalTrain Demo"
