@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<!---
+SignalTrain Demo
+
+This can be run with python simple httpd server, e.g.
+
+$ python3 -m http.server
+
+...and then point your browser to http://localhost:8000
+, provided that you also have a bokeh server running and allowing connection from the same port, e.g.
+
+$ bokeh serve bokeh_sliders.py --allow-websocket-origin=localhost:8000
+
+As for getting it to run more generally, good luck!
+
+--->
+<html lang="en">
+<head>
+<title>SignalTrain Demo</title>
+</head>
+<body>
+<h1>SignalTrain Demo Page</h1>
+
+For the paper "______", by [authors names witheld for anonymous review]
+
+<div>
+<h2>Interactive Slider Demo:</h2>
+The network for this demo was trained for input and output sizes of 4096 samples.<br>
+<link rel="stylesheet" href="https://cdn.pydata.org/bokeh/release/bokeh-0.12.1.min.css" type="text/css" />
+<script type="text/javascript" src="https://cdn.pydata.org/bokeh/release/bokeh-0.12.1.min.js"></script>
+<script type="text/javascript"> Bokeh.set_log_level("info"); </script>
+<script src="http://localhost:5006/bokeh_sliders/autoload.js?bokeh-autoload-element=1002&bokeh-app-path=/bokeh_sliders&bokeh-absolute-url=http://localhost:5006/bokeh_sliders" id="1002"></script>
+
+</div>
+
+<div>
+<h2>Audio Samples:</h2>
+The audio samples were created using a network trained for input size of ____ and output size of ____<br>
+<b>(TODO: for now, these are placeholders.  Need to add more.)</b>
+<table border="2">
+<tr><td>Input</td><td>Target Output</td><td>Predicted Output</td></tr>
+<tr><td>
+<audio controls><source src="https://signaltrain.github.io/input_1_.wav" type="audio/wav">
+Your browser does not support the audio element.</audio></td>
+<td>nothing yet</td><td>nothing yet</td>
+</tr>
+</table>
+
+</div>
+<hr>
+(c) 2019 by SignalTrain authors [names witheld for anonymous review]
+</body>
+</html>

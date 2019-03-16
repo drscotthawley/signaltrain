@@ -24,6 +24,11 @@ else:
     torch.set_default_tensor_type('torch.FloatTensor')
 
 
+from bokeh.embed import server_document
+script = server_document("http://localhost:5006/bokeh_sliders")
+
+print("script =\n",script)
+
 # define default global variables
 chunk_size=None
 sr = None
@@ -85,9 +90,10 @@ def setup_model(checkpoint_file, fatal=True):
 # Set up list of effects. written generally so we can add other effects later
 effects_dict = dict()
 effects_dict['comp_4c'] = {'name':'4-Knob Compressor', 'effect':st.audio.Compressor_4c(), 'checkpoint':'model_comp4c_4k.tar'}
-effects_dict['comp_3c'] = {'name':'3-Knob Compressor', 'effect':st.audio.Compressor(),    'checkpoint':'model_comp3c_4k.tar'}
-effects_dict['denoise'] = {'name':'Denoiser',          'effect':None,      'checkpoint':'modelcheckpoint_denoise.tar'} # don't link in audio.Denoise()
-effects_dict['decomp_4c'] = {'name':'4-Knob De-Compressor', 'effect':None, 'checkpoint':''} # do not try to use decompressor effect
+# other effects to enable later: 
+#effects_dict['comp_3c'] = {'name':'3-Knob Compressor', 'effect':st.audio.Compressor(),    'checkpoint':'model_comp3c_4k.tar'}
+#effects_dict['denoise'] = {'name':'Denoiser',          'effect':None,      'checkpoint':'modelcheckpoint_denoise.tar'} # don't link in audio.Denoise()
+#effects_dict['decomp_4c'] = {'name':'4-Knob De-Compressor', 'effect':None, 'checkpoint':''} # do not try to use decompressor effect
 effects_dict['nothing'] = {'name':'Nothing (for testing)', 'effect':None,  'checkpoint':''}
 shortname = 'comp_4c'   # select default effect
 
