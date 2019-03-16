@@ -90,7 +90,7 @@ def setup_model(checkpoint_file, fatal=True):
 # Set up list of effects. written generally so we can add other effects later
 effects_dict = dict()
 effects_dict['comp_4c'] = {'name':'4-Knob Compressor', 'effect':st.audio.Compressor_4c(), 'checkpoint':'model_comp4c_4k.tar'}
-# other effects to enable later: 
+# other effects to enable later:
 #effects_dict['comp_3c'] = {'name':'3-Knob Compressor', 'effect':st.audio.Compressor(),    'checkpoint':'model_comp3c_4k.tar'}
 #effects_dict['denoise'] = {'name':'Denoiser',          'effect':None,      'checkpoint':'modelcheckpoint_denoise.tar'} # don't link in audio.Denoise()
 #effects_dict['decomp_4c'] = {'name':'4-Knob De-Compressor', 'effect':None, 'checkpoint':''} # do not try to use decompressor effect

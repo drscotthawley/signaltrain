@@ -25,14 +25,14 @@ For the paper "______", by [authors names witheld for anonymous review]
 
 <div>
 <h2>Interactive Slider Demo:</h2>
-The network for this demo was trained for input and output sizes of 4096 samples.<br>
+The neural network deployed for this demo was trained on input and output sizes of 4096 samples.<br>
 <link rel="stylesheet" href="https://cdn.pydata.org/bokeh/release/bokeh-0.12.1.min.css" type="text/css" />
 <script type="text/javascript" src="https://cdn.pydata.org/bokeh/release/bokeh-0.12.1.min.js"></script>
 <script type="text/javascript"> Bokeh.set_log_level("info"); </script>
 <script src="http://localhost:5006/bokeh_sliders/autoload.js?bokeh-autoload-element=1002&bokeh-app-path=/bokeh_sliders&bokeh-absolute-url=http://localhost:5006/bokeh_sliders" id="1002"></script>
 
 </div>
-
+<br>
 <div>
 <h2>Audio Samples:</h2>
 The audio samples were created using a network trained for input size of ____ and output size of ____<br>
@@ -45,8 +45,194 @@ Your browser does not support the audio element.</audio></td>
 <td>nothing yet</td><td>nothing yet</td>
 </tr>
 </table>
+</div>
+
+<br><br>
+
+<div>
+<h2>Code:</h2>
+Full code will be released on GitHub pending peer review.
+In the meantime, here are the software effects that were trained against:<br>
+
+<h3>4-Knob Compressor - serial execution:</h3>
+<!-- HTML generated using hilite.me --><div style="background: #ffffff; overflow:auto;width:auto;border:solid gray;border-width:.1em .1em .1em .8em;padding:.2em .6em;"><table><tr><td><pre style="margin: 0; line-height: 125%"> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56</pre></td><td><pre style="margin: 0; line-height: 125%">  <span style="color: #008800; font-weight: bold">import</span> <span style="color: #0e84b5; font-weight: bold">numpy</span> <span style="color: #008800; font-weight: bold">as</span> <span style="color: #0e84b5; font-weight: bold">np</span>
+  <span style="color: #008800; font-weight: bold">from</span> <span style="color: #0e84b5; font-weight: bold">numba</span> <span style="color: #008800; font-weight: bold">import</span> jit
+
+  <span style="color: #555555; font-weight: bold">@jit</span>(nopython<span style="color: #333333">=</span><span style="color: #007020">True</span>)
+  <span style="color: #008800; font-weight: bold">def</span> <span style="color: #0066BB; font-weight: bold">my_clip_min</span>(x, clip_min):  <span style="color: #888888"># does the work of np.clip(), which numba doesn&#39;t support yet</span>
+      <span style="color: #888888"># TODO: keep an eye on Numba PR https://github.com/numba/numba/pull/3468 that fixes this</span>
+      inds <span style="color: #333333">=</span> np<span style="color: #333333">.</span>where(x <span style="color: #333333">&lt;</span> clip_min)
+      x[inds] <span style="color: #333333">=</span> clip_min
+      <span style="color: #008800; font-weight: bold">return</span> x
+
+  <span style="color: #555555; font-weight: bold">@jit</span>(nopython<span style="color: #333333">=</span><span style="color: #007020">True</span>)
+  <span style="color: #008800; font-weight: bold">def</span> <span style="color: #0066BB; font-weight: bold">compressor_4controls</span>(x, thresh<span style="color: #333333">=-</span><span style="color: #6600EE; font-weight: bold">24.0</span>, ratio<span style="color: #333333">=</span><span style="color: #6600EE; font-weight: bold">2.0</span>, attackTime<span style="color: #333333">=</span><span style="color: #6600EE; font-weight: bold">0.01</span>, releaseTime<span style="color: #333333">=</span><span style="color: #6600EE; font-weight: bold">0.01</span>, sr<span style="color: #333333">=</span><span style="color: #6600EE; font-weight: bold">44100.0</span>, dtype<span style="color: #333333">=</span>np<span style="color: #333333">.</span>float32):
+      <span style="color: #DD4422">&quot;&quot;&quot;</span>
+<span style="color: #DD4422">      Thanks to Eric Tarr for MATLAB code for this, p. 428 of Hack Audio book.  Python version here used with permission.</span>
+<span style="color: #DD4422">      Our mods for Python:</span>
+<span style="color: #DD4422">          Minimized the for loop, removed dummy variables, and invoked numba @jit to make this &quot;fast&quot;</span>
+<span style="color: #DD4422">      Inputs:</span>
+<span style="color: #DD4422">        x: input signal</span>
+<span style="color: #DD4422">        sr: sample rate in Hz</span>
+<span style="color: #DD4422">        thresh: threhold in dB</span>
+<span style="color: #DD4422">        ratio: ratio (should be &gt;=1 , i.e. ratio:1)</span>
+<span style="color: #DD4422">        attackTime, releaseTime: in seconds</span>
+<span style="color: #DD4422">        dtype: typical numpy datatype</span>
+<span style="color: #DD4422">      &quot;&quot;&quot;</span>
+      N <span style="color: #333333">=</span> <span style="color: #007020">len</span>(x)
+      y <span style="color: #333333">=</span> np<span style="color: #333333">.</span>zeros(N, dtype<span style="color: #333333">=</span>dtype)
+      lin_A <span style="color: #333333">=</span> np<span style="color: #333333">.</span>zeros(N, dtype<span style="color: #333333">=</span>dtype)  <span style="color: #888888"># functions as gain</span>
+
+      <span style="color: #888888"># Initialize separate attack and release times</span>
+      alphaA <span style="color: #333333">=</span> np<span style="color: #333333">.</span>exp(<span style="color: #333333">-</span>np<span style="color: #333333">.</span>log(<span style="color: #0000DD; font-weight: bold">9</span>)<span style="color: #333333">/</span>(sr <span style="color: #333333">*</span> attackTime))<span style="color: #888888">#.astype(dtype)</span>
+      alphaR <span style="color: #333333">=</span> np<span style="color: #333333">.</span>exp(<span style="color: #333333">-</span>np<span style="color: #333333">.</span>log(<span style="color: #0000DD; font-weight: bold">9</span>)<span style="color: #333333">/</span>(sr <span style="color: #333333">*</span> releaseTime))<span style="color: #888888">#.astype(dtype)</span>
+
+      <span style="color: #888888"># Turn the input signal into a uni-polar signal on the dB scale</span>
+      x_uni <span style="color: #333333">=</span> np<span style="color: #333333">.</span>abs(x)<span style="color: #333333">.</span>astype(dtype)
+      x_dB <span style="color: #333333">=</span> <span style="color: #0000DD; font-weight: bold">20</span><span style="color: #333333">*</span>np<span style="color: #333333">.</span>log10(x_uni <span style="color: #333333">+</span> <span style="color: #6600EE; font-weight: bold">1e-8</span>)<span style="color: #333333">.</span>astype(dtype)
+
+      <span style="color: #888888"># Ensure there are no values of negative infinity</span>
+      <span style="color: #888888">#x_dB = np.clip(x_dB, -96, None)   # Numba doesn&#39;t yet support np.clip but we can write our own</span>
+      x_dB <span style="color: #333333">=</span> my_clip_min(x_dB, <span style="color: #333333">-</span><span style="color: #0000DD; font-weight: bold">96</span>)
+
+      <span style="color: #888888"># Static Characteristics</span>
+      gainChange_dB <span style="color: #333333">=</span> np<span style="color: #333333">.</span>zeros(x_dB<span style="color: #333333">.</span>shape[<span style="color: #0000DD; font-weight: bold">0</span>])
+      i <span style="color: #333333">=</span> np<span style="color: #333333">.</span>where(x_dB <span style="color: #333333">&gt;</span> thresh)
+      gainChange_dB[i] <span style="color: #333333">=</span>  thresh <span style="color: #333333">+</span> (x_dB[i] <span style="color: #333333">-</span> thresh)<span style="color: #333333">/</span>ratio <span style="color: #333333">-</span> x_dB[i] <span style="color: #888888"># Perform Downwards Compression</span>
+
+      <span style="color: #008800; font-weight: bold">for</span> n <span style="color: #000000; font-weight: bold">in</span> <span style="color: #007020">range</span>(x_dB<span style="color: #333333">.</span>shape[<span style="color: #0000DD; font-weight: bold">0</span>]):   <span style="color: #888888"># this loop is slow but unavoidable if alphaA != alphaR. @jit makes it fast(er).</span>
+          <span style="color: #888888"># smooth over the gainChange</span>
+          <span style="color: #008800; font-weight: bold">if</span> gainChange_dB[n] <span style="color: #333333">&lt;</span> lin_A[n<span style="color: #333333">-</span><span style="color: #0000DD; font-weight: bold">1</span>]:
+              lin_A[n] <span style="color: #333333">=</span> ((<span style="color: #0000DD; font-weight: bold">1</span><span style="color: #333333">-</span>alphaA)<span style="color: #333333">*</span>gainChange_dB[n]) <span style="color: #333333">+</span>(alphaA<span style="color: #333333">*</span>lin_A[n<span style="color: #333333">-</span><span style="color: #0000DD; font-weight: bold">1</span>]) <span style="color: #888888"># attack mode</span>
+          <span style="color: #008800; font-weight: bold">else</span>:
+              lin_A[n] <span style="color: #333333">=</span> ((<span style="color: #0000DD; font-weight: bold">1</span><span style="color: #333333">-</span>alphaR)<span style="color: #333333">*</span>gainChange_dB[n]) <span style="color: #333333">+</span>(alphaR<span style="color: #333333">*</span>lin_A[n<span style="color: #333333">-</span><span style="color: #0000DD; font-weight: bold">1</span>]) <span style="color: #888888"># release</span>
+
+      lin_A <span style="color: #333333">=</span> np<span style="color: #333333">.</span>power(<span style="color: #6600EE; font-weight: bold">10.0</span>,(lin_A<span style="color: #333333">/</span><span style="color: #0000DD; font-weight: bold">20</span>))<span style="color: #333333">.</span>astype(dtype)  <span style="color: #888888"># Convert to linear amplitude scalar; i.e. map from dB to amplitude</span>
+      y <span style="color: #333333">=</span> lin_A <span style="color: #333333">*</span> x    <span style="color: #888888"># Apply linear amplitude to input sample</span>
+
+      <span style="color: #008800; font-weight: bold">return</span> y<span style="color: #333333">.</span>astype(dtype)
+</pre></td></tr></table></div>
+
+
+
+<h3>3-Knob Compressor - all at once (filter) execution:</h3>
+<!-- HTML generated using hilite.me --><div style="background: #ffffff; overflow:auto;width:auto;border:solid gray;border-width:.1em .1em .1em .8em;padding:.2em .6em;"><table><tr><td><pre style="margin: 0; line-height: 125%"> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27</pre></td><td><pre style="margin: 0; line-height: 125%"><span style="color: #008800; font-weight: bold">import</span> <span style="color: #0e84b5; font-weight: bold">scipy.signal</span> <span style="color: #008800; font-weight: bold">as</span> <span style="color: #0e84b5; font-weight: bold">scipy_signal</span>
+<span style="color: #008800; font-weight: bold">from</span> <span style="color: #0e84b5; font-weight: bold">numba</span> <span style="color: #008800; font-weight: bold">import</span> autojit
+
+<span style="color: #555555; font-weight: bold">@autojit</span>
+<span style="color: #008800; font-weight: bold">def</span> <span style="color: #0066BB; font-weight: bold">compressor</span>(x, thresh<span style="color: #333333">=-</span><span style="color: #0000DD; font-weight: bold">24</span>, ratio<span style="color: #333333">=</span><span style="color: #0000DD; font-weight: bold">2</span>, attackrel<span style="color: #333333">=</span><span style="color: #6600EE; font-weight: bold">0.045</span>, sr<span style="color: #333333">=</span><span style="color: #6600EE; font-weight: bold">44100.0</span>, dtype<span style="color: #333333">=</span>np<span style="color: #333333">.</span>float32):
+    <span style="color: #DD4422">&quot;&quot;&quot;</span>
+<span style="color: #DD4422">    simple compressor effect, code thanks to Eric Tarr @hackaudio</span>
+<span style="color: #DD4422">    Inputs:</span>
+<span style="color: #DD4422">       x:        the input waveform</span>
+<span style="color: #DD4422">       thresh:   threshold in dB</span>
+<span style="color: #DD4422">       ratio:    compression ratio</span>
+<span style="color: #DD4422">       attackrel:   attack &amp; release time in seconds</span>
+<span style="color: #DD4422">       sr:       sample rate</span>
+<span style="color: #DD4422">    &quot;&quot;&quot;</span>
+    attack <span style="color: #333333">=</span> attackrel <span style="color: #333333">*</span> sr  <span style="color: #888888"># convert to samples</span>
+    fc <span style="color: #333333">=</span> <span style="color: #6600EE; font-weight: bold">1.0</span><span style="color: #333333">/</span><span style="color: #007020">float</span>(attack)     <span style="color: #888888"># this is like 1/attack time</span>
+    b, a <span style="color: #333333">=</span> scipy_signal<span style="color: #333333">.</span>butter(<span style="color: #0000DD; font-weight: bold">1</span>, fc, analog<span style="color: #333333">=</span><span style="color: #007020">False</span>, output<span style="color: #333333">=</span><span style="background-color: #fff0f0">&#39;ba&#39;</span>)
+    zi <span style="color: #333333">=</span> scipy_signal<span style="color: #333333">.</span>lfilter_zi(b, a)
+
+    dB <span style="color: #333333">=</span> <span style="color: #6600EE; font-weight: bold">20.</span> <span style="color: #333333">*</span> np<span style="color: #333333">.</span>log10(np<span style="color: #333333">.</span>abs(x) <span style="color: #333333">+</span> <span style="color: #6600EE; font-weight: bold">1e-6</span>)<span style="color: #333333">.</span>astype(dtype)
+    in_env, _ <span style="color: #333333">=</span> scipy_signal<span style="color: #333333">.</span>lfilter(b, a, dB, zi<span style="color: #333333">=</span>zi<span style="color: #333333">*</span>dB[<span style="color: #0000DD; font-weight: bold">0</span>])  <span style="color: #888888"># input envelope calculation</span>
+    out_env <span style="color: #333333">=</span> np<span style="color: #333333">.</span>copy(in_env)              <span style="color: #888888"># output envelope</span>
+    i <span style="color: #333333">=</span> np<span style="color: #333333">.</span>where(in_env <span style="color: #333333">&gt;</span>  thresh)          <span style="color: #888888"># compress where input env exceeds thresh</span>
+    out_env[i] <span style="color: #333333">=</span> thresh <span style="color: #333333">+</span> (in_env[i]<span style="color: #333333">-</span>thresh)<span style="color: #333333">/</span>ratio
+    gain <span style="color: #333333">=</span> np<span style="color: #333333">.</span>power(<span style="color: #6600EE; font-weight: bold">10.0</span>,(out_env<span style="color: #333333">-</span>in_env)<span style="color: #333333">/</span><span style="color: #0000DD; font-weight: bold">20</span>)
+    y <span style="color: #333333">=</span> (x <span style="color: #333333">*</span> gain)<span style="color: #333333">.</span>astype(dtype)
+    <span style="color: #008800; font-weight: bold">return</span> y
+</pre></td></tr></table></div>
+
+
+
+
 
 </div>
+
+
 <hr>
 (c) 2019 by SignalTrain authors [names witheld for anonymous review]
 </body>
