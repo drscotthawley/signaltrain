@@ -14,17 +14,6 @@ sys.path.append('..')
 import signaltrain as st
 
 
-def tiny_test(signal, knobs_nn, model, chunk_size, out_chunk_size, sr=44100, effect=None, device="cpu:0"):
-    overlap = chunk_size-out_chunk_size
-    print("tiny_test: chunk_size, out_chunk_size, overlap = ",chunk_size, out_chunk_size, overlap)
-    x = st.audio.sliding_window(signal, chunk_size, overlap=overlap)
-    print("tiny_test: signal.shape, x.shape = ",signal.shape, x.shape)
-    xnew = st.audio.undo_sliding_window(x, overlap)
-    print("tiny_test:  xnew.shape = ",xnew.shape)
-
-    return
-
-
 def predict_long(signal, knobs_nn, model, chunk_size, out_chunk_size, sr=44100, effect=None, device="cpu:0"):
 
     # reshape input and knobs.  break signal up into overlapping windows
@@ -120,8 +109,6 @@ if __name__ == "__main__":
     else:
         print("Warning: only comp_4c effect is implemented now. Skipping target generation.")
 
-    y_pred = tiny_test(signal, knobs_nn, model, chunk_size, out_chunk_size, sr=sr, device=device)
-
 
     # Call the predict_long routine
     print("\nCalling predict_long()...")
@@ -133,7 +120,7 @@ if __name__ == "__main__":
     # output files (offset pred with zeros to time-match with input & target)
     y_out = np.zeros(len(y_target),dtype=np.float32)
     y_out[-len(y_pred):] = y_pred
-    
+
     print("Output y_out.shape = ",y_out.shape)
     st.audio.write_audio_file("input.wav", signal, sr=44100)
     st.audio.write_audio_file("y_pred.wav", y_out, sr=44100)
