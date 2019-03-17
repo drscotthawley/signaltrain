@@ -31,7 +31,7 @@ class AudioFileDataSet(Dataset):
     Read from premade audio files.  Is a subclass of PyTorch Dataset so you can use DataLoader
     """
     def __init__(self, chunk_size, effect, sr=44100, path="./Train/", datapoints=8000, \
-        dtype=np.float32, preload=True, skip_factor=0, rerun=False, y_size=None):
+        dtype=np.float32, preload=True, skip_factor=0, rerun=False, y_size=None, rand_invert=True):
         super(AudioFileDataSet, self).__init__()
 
         self.chunk_size = chunk_size
@@ -47,6 +47,7 @@ class AudioFileDataSet(Dataset):
             self.y_size = chunk_size
         else:
             self.y_size = y_size
+        self.rand_invert = rand_invert   # data augmentation: randomly invert phase
         self.processed_dir = ''
         self.num_knobs = 0
         '''
@@ -181,6 +182,9 @@ class AudioFileDataSet(Dataset):
         kr = self.effect.knob_ranges   # kr is abbribation for 'knob ranges'
         knobs_nn = (knobs_wc - kr[:,0])/(kr[:,1]-kr[:,0]) - 0.5
 
+        if self.rand_invert and np.random.choice([True,False]): # randomly flip phase for data augmentation
+            x_item, y_item = -x_item, -y_item
+
         return x_item.astype(self.dtype), y_item.astype(self.dtype), knobs_nn.astype(self.dtype)
 
     # required part of torch.Dataset class.  This is how DataLoader gets a new piece of data
@@ -203,7 +207,8 @@ class SynthAudioDataSet(Dataset):
     To prevent this, one can pass the DataLoader a worker_init_fn that sets the random seed.
        See https://pytorch.org/docs/stable/notes/faq.html#dataloader-workers-random-seed
     """
-    def __init__(self, chunk_size,  effect, sr=44100, datapoints=8000, dtype=np.float32, recycle=False, y_size=None):
+    def __init__(self, chunk_size,  effect, sr=44100, datapoints=8000, dtype=np.float32,
+        recycle=False, y_size=None, rand_invert=True):
         super(SynthAudioDataSet, self).__init__()
         self.chunk_size = chunk_size
         self.effect = effect
@@ -213,6 +218,7 @@ class SynthAudioDataSet(Dataset):
         self.recycle = recycle
         self.num_knobs = len(effect.knob_names)
         self.y_size = chunk_size if (y_size is None) else y_size
+        self.rand_invert = rand_invert   # data augmentation: randomly invert phase
 
         # preallocate an array of time values across one chunk for use with audio synth functions
         self.t = np.arange(chunk_size, dtype=np.float32) / sr
@@ -254,6 +260,9 @@ class SynthAudioDataSet(Dataset):
         y, x = self.effect.go(x, knobs)   # Apply the audio effect
 
         y = y[-self.y_size:]    # shrink output size
+
+        if self.rand_invert and np.random.choice([True,False]): # randomly flip phase for data augmentation
+            x, y = -x, -y
 
         return x, y, knobs
 
