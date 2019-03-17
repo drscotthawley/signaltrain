@@ -8,6 +8,8 @@ import torch
 import numpy as np
 import torch.nn as nn
 from .cls_fe_dft import Analysis, Synthesis
+torch.backends.cudnn.benchmark = True   # makes Turing GPU ops faster! https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936/3
+
 
 class AsymAutoEncoder(nn.Module):
     def __init__(self, T=25, R=64, K=3, OT=None):
@@ -22,11 +24,23 @@ class AsymAutoEncoder(nn.Module):
         else:
             self._OT = OT
 
-        # Analysis
-        self.fnn_enc = nn.Linear(self._T, self._R, bias=True)
-        self.fnn_enc2 = nn.Linear(self._R, self._R//2, bias=True)
+        bias = True
+        self.bias = bias
 
-        self.use_BN = False
+        print("AsymAutoEncoder __init__: T, R, K, OT = ",T, R, K, OT)
+
+        # Analysis
+        self.fnn_enc = nn.Linear(self._T, self._R, bias=bias)
+        self.fnn_enc2 = nn.Linear(self._R, self._R//2, bias=bias)
+
+        # data reduction for lookback
+        self.try_dr = False
+        if self.try_dr:
+            c = 10
+            self.dr1 = nn.Conv1d(1, c, 3, padding=1, stride=2, bias=bias)
+            self.dr2 = nn.Conv1d(c, 1, 3, padding=1, stride=2, bias=bias)
+
+        self.use_BN = False  # experimented with Batch Norm. doesn't really help 
         if self.use_BN:
             bn_size = 1025 # TODO: ?? why isn't this self._R//2
             print("****Confirm: BatchNorm is ON")
@@ -38,18 +52,19 @@ class AsymAutoEncoder(nn.Module):
             self.fnn_bn6 = nn.BatchNorm1d(bn_size)
             self.fnn_bn7 = nn.BatchNorm1d(bn_size)
 
-        self.fnn_enc3 = nn.Linear(self._R//2, self._R//4, bias=True)
-        self.fnn_enc4 = nn.Linear(self._R//4, self._R//4, bias=True)
+        self.fnn_enc3 = nn.Linear(self._R//2, self._R//4, bias=bias)
+        self.fnn_enc4 = nn.Linear(self._R//4, self._R//4, bias=bias)
 
-        self.fnn_addknobs = nn.Linear(self._R//4 + self._K, self._R//4, bias=True)
-        self.fnn_dec4 = nn.Linear(self._R//4, self._R//4, bias=True)
-        self.fnn_dec3 = nn.Linear(self._R//4, self._R//2, bias=True)
+        self.fnn_addknobs = nn.Linear(self._R//4 + self._K, self._R//4, bias=bias)
+        self.fnn_dec4 = nn.Linear(self._R//4, self._R//4, bias=bias)
+        self.fnn_dec3 = nn.Linear(self._R//4, self._R//2, bias=bias)
 
-        self.fnn_dec2 = nn.Linear(self._R//2, self._R, bias=True)
-        self.fnn_dec = nn.Linear(self._R, self._OT, bias=True)
+        self.fnn_dec2 = nn.Linear(self._R//2, self._R, bias=bias)
+        self.fnn_dec = nn.Linear(self._R, self._OT, bias=bias)
 
         # Activation function(s)
         self.relu = nn.ELU()#  nn.LeakyReLU()
+        #self.relu = nn.ReLU()
 
         self.initialize()
 
@@ -63,18 +78,26 @@ class AsymAutoEncoder(nn.Module):
         torch.nn.init.xavier_normal_(self.fnn_dec2.weight)
         torch.nn.init.xavier_normal_(self.fnn_dec3.weight)
         torch.nn.init.xavier_normal_(self.fnn_dec.weight)
-        self.fnn_enc.bias.data.zero_()
-        self.fnn_enc2.bias.data.zero_()
-        self.fnn_enc3.bias.data.zero_()
-        self.fnn_enc4.bias.data.zero_()
-        self.fnn_dec4.bias.data.zero_()
-        self.fnn_addknobs.bias.data.zero_()
-        self.fnn_dec3.bias.data.zero_()
-        self.fnn_dec2.bias.data.zero_()
-        self.fnn_dec.bias.data.zero_()
+        if self.bias:
+            self.fnn_enc.bias.data.zero_()
+            self.fnn_enc2.bias.data.zero_()
+            self.fnn_enc3.bias.data.zero_()
+            self.fnn_enc4.bias.data.zero_()
+            self.fnn_dec4.bias.data.zero_()
+            self.fnn_addknobs.bias.data.zero_()
+            self.fnn_dec3.bias.data.zero_()
+            self.fnn_dec2.bias.data.zero_()
+            self.fnn_dec.bias.data.zero_()
 
     def forward(self, x_input, knobs, skip_connections='res'):
         x_input = x_input.transpose(2, 1)
+
+        # data reduction step
+        if self.try_dr:
+            tmp = self.relu( self.dr1(x_input) )
+            tmp = self.relu( self.dr2(tmp) )
+            print("hey: after data reduction, tmp.size = ",tmp.size())
+
         z = self.relu(self.fnn_enc(x_input))
         if self.use_BN: z = self.fnn_bn1(z)
         z = self.relu(self.fnn_enc2(z))
@@ -116,6 +139,8 @@ class AsymMPAEC(nn.Module):
     """
     def __init__(self, expected_time_frames, ft_size=1024, hop_size=384, decomposition_rank=64, n_knobs=3, output_tf=None):
         super(AsymMPAEC, self).__init__()
+
+        print("AsymMPAEC: expected_time_frames, ft_size, hop_size, decomposition_rank, n_knobs, output_tf = ", expected_time_frames, ft_size, hop_size, decomposition_rank, n_knobs, output_tf)
         if output_tf is None:
             self.output_tf = expected_time_frames
         else:
@@ -137,11 +162,16 @@ class AsymMPAEC(nn.Module):
                                       max_norm=1., norm_type=1)
 
     def forward(self, x_cuda, knobs_cuda):
+
+
         # trainable STFT, outputs spectrograms for real & imag parts
         x_real, x_imag = self.dft_analysis.forward(x_cuda/2)  # the /2 is to normalize between -0.5 and .5
         # Magnitude-Phase computation
         mag = torch.norm(torch.cat((x_real.unsqueeze(0), x_imag.unsqueeze(0)), 0), 2, dim=0)
-        phs = torch.atan2(x_imag, x_real+1e-6)
+        phs = torch.atan2(x_imag.float(), x_real.float()+1e-7).to(x_cuda.dtype)
+
+        # perform some kind of data reduction on the first half
+
 
         # Processes Magnitude and phase individually
         mag_hat = self.aenc.forward(mag, knobs_cuda, skip_connections='sf')
@@ -189,8 +219,10 @@ class st_model(nn.Module):
         print("Sample rate =",sr)
 
         # Analysis parameters
-        ft_size = int(1024 * scale_factor)
+        ft_size = int(1024* scale_factor)
         hop_size = int(384 * scale_factor)
+        #hop_size = int(256 * scale_factor)
+
         expected_time_frames = int(np.ceil(chunk_size/float(hop_size)) + np.ceil(ft_size/float(hop_size)))
         output_time_frames = int(np.ceil(out_chunk_size/float(hop_size)) + np.ceil(ft_size/float(hop_size)))
         y_size = (output_time_frames-1)*hop_size - ft_size
@@ -205,44 +237,3 @@ class st_model(nn.Module):
 
     def forward(self, x_cuda, knobs_cuda):
         return self.mpaec.forward(x_cuda, knobs_cuda)
-
-
-
-'''
-# Hasn't been used in a while
-class Ensemble(nn.Module):
-    """
-    makes an ensemble of similar models from a 'seed' model
-    """
-    def __init__(self, model, N=4):#   N = number of 'copies' of model  expected_time_frames, ft_size=1024, hop_size=384, decomposition_rank=64):
-        super(Ensemble, self).__init__()
-        self.models = []
-        for i in range(N):
-            self.models.append(torch.copy.deepcopy(model))
-            self.models[i].reinitialize()
-        self.rel = nn.Parameter(torch.ones(N).mean(), requires_grad=True) # releative weights for ensemble outputs
-
-    def forward(self, x_cuda, knobs_cuda):
-        i = 0
-        x_hat, mag, mag_hat = self.rel[i]*(self.models[i].forward(x_cuda, knobs_cuda))
-        for i in range(1,len(self.models)):
-            x_hati, magi, mag_hati = self.rel[i]*(self.models[i].forward(x_cuda, knobs_cuda))
-            x_hat, mag, mag_hat =  x_hat + x_hati,  mag + magi, mag_hat + mag_hati
-        return x_hat, mag, mag_hat
-
-    def clip_grad_norm_(self):
-        for i in range(len(self.models)):
-            self.models[i].clip_grad_norm()
-
-    def parameters(self):
-        params = []
-        for i in range(len(self.models)):
-            params += models[i].parameters()
-        return params
-
-    def backward(self):
-        for i in range(len(self.models)):
-            self.models[i].backward()
-'''
-
-# EOF
