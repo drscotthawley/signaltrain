@@ -57,13 +57,17 @@ def undo_siding_window_view(x, overlap):
     shape = [(overlap + len(x[:,overlap:])//overlap)*overlap - overlap + 1]
     return np.lib.stride_tricks.as_strided(x, shape=shape, strides=[x.strides[-1]], writeable=False)
 '''
-def undo_sliding_window(x, overlap):
+def undo_sliding_window(x, overlap, flatsize=None):
     """
     This works in general, i.e. for views and for copies of arrays.
-    NOTE: does not undo any padding that might have occurred.
+    NOTE: only undoes padding that might have occurred if flatsize != None.
     """
     if overlap != 0:
-        return np.concatenate( (x[0,0:overlap],x[:,overlap:].flatten()))
+        xnew =  np.concatenate( (x[0,0:overlap],  x[:,overlap:].flatten() ) )
+        if flatsize is not None:
+          return xnew[0:flatsize]
+        else:
+          return xnew
     else:
         return x
 
@@ -249,7 +253,7 @@ def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
     Synthesizes one instance from various 'fake' audio wave forms -- synthetic data
     """
     if chooser is None:
-        chooser = np.random.randint(0, 10)
+        chooser = np.random.randint(0, 11)
 
     if 0 == chooser:                     # sine, with random phase, amp & freq
         return randsine(t, t0_fac=t0_fac)
@@ -274,7 +278,9 @@ def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
         f_low, f_high  = np.random.randint(20,1000), np.random.randint(1000,20000)
         amp_too = np.random.choice([False,False,True])
         return sweep(t, freq_range=[f_low, f_high], amp_too=amp_too)
-    elif 10 == chooser:                  # just noise
+    elif 10 == chooser:                     # box plus noise
+        return st.audio.box(t) + 0.2*np.random.rand()*(2*np.random.rand(t.shape[0])-1) + 0.2*np.random.rand()*pinknoise(t.shape[0])
+    elif 11 == chooser:                  # just noise
         amp_n = (0.6*randfunc()+0.2)
         return amp_n*pinknoise(t.shape[0])
     else:
@@ -388,11 +394,12 @@ class Effect():
        Network will call go() with normalized knob values, which then will call go_wc()
        The go_wc() method should return two value: y, x   where y is target output and x is input signal
     """
-    def __init__(self, sr=44100.0):
+    def __init__(self, sr=44100.0, dtype=np.float32):
         self.name = 'Generic Effect'
         self.knob_names = ['knob']
-        self.knob_ranges = np.array([[0,1]])  # min,max world coordinate values for "all the way counterclockwise" and "all the way clockwise"
+        self.knob_ranges = np.array([[0,1]]).astype(dtype)  # min,max world coordinate values for "all the way counterclockwise" and "all the way clockwise"
         self.sr = sr
+        self.dtype=dtype
         self.is_inverse = False  # Does this effect perform an 'inverse problem' by reversing x & y at the end?
 
     def knobs_wc(self, knobs_nn):   # convert knob vals from [-.5,.5] to "world coordinates" used by effect functions
@@ -436,8 +443,8 @@ class Compressor_4c(Effect):  # compressor with 4 controls
         return compressor_4controls(x, thresh=knobs_w[0], ratio=knobs_w[1], attackTime=knobs_w[2], releaseTime=knobs_w[3], sr=self.sr), x
 
 class Echo(Effect):
-    def __init__(self):
-        super(Echo, self).__init__()
+    def __init__(self, **kwargs):
+        super(Echo, self, **kwargs).__init__()
         self.name = 'Echo'
         self.knob_names = ['delay_samples', 'ratio', 'echoes']
         #self.knob_ranges = np.array([[100,1500], [0.1,0.9],[2,2]])
@@ -446,8 +453,8 @@ class Echo(Effect):
         return echo(x, delay_samples=int(np.round(knobs_w[0])), ratio=knobs_w[1], echoes=int(np.round(knobs_w[2]))), x
 
 class PitchShifter(Effect):
-    def __init__(self):
-        super(PitchShifter, self).__init__()
+    def __init__(self, **kwargs):
+        super(PitchShifter, self, **kwargs).__init__()
         self.name = 'PitchShifter'
         self.knob_names = ['n_steps']
         self.knob_ranges = np.array([[-12,12]])  # number of 12-tone pitch steps by which to shift the signal
@@ -460,14 +467,14 @@ class Denoise(Effect):  # add noise to x, swap x and y
     So you wouldn't be able to input a noisy signal and have it get denoised.
     But when the network trains on this, it learns to take noisy input and denoise it by a tunable amount 'strength'
     """
-    def __init__(self):
-        super(Denoise, self).__init__()
+    def __init__(self, **kwargs):
+        super(Denoise, self, **kwargs).__init__()
         self.name = 'Denoise'
         self.knob_names = ['strength']
-        self.knob_ranges = np.array([[0.01,0.5]])
+        self.knob_ranges = np.array([[0.0,0.5]])
         self.is_inverse = True
     def go_wc(self, x, knobs_w):
-        return x, x + knobs_w[0]*(2*np.random.random(x.shape[0])-1)   # swaps y & x: what was the input becomes the output
+        return x, x + (knobs_w[0]*(2*np.random.random(x.shape[0])-1)).astype(x.dtype)   # swaps y & x: what was the input becomes the output
 
 class DeCompressor_4c(Effect):  # compressor with 4 controls
     def __init__(self):
