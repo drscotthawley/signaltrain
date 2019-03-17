@@ -8,9 +8,10 @@ import os
 template_dir = os.path.abspath('./demo')
 app = Flask(__name__, template_folder=template_dir)
 
-port = os.environ['PORT']  # Heroku requires that you use $PORT
+#port = os.environ['PORT']  # Heroku requires that you use $PORT
 bokeh_process = subprocess.Popen(
-    ['bokeh', 'serve',f'--port={port}', '--address=0.0.0.0', '--allow-websocket-origin=signaltrain.herokuapp.com','--use-xheaders','bokeh_sliders.py'], cwd="./demo", stdout=subprocess.PIPE)
+#    ['bokeh', 'serve',f'--port={port}', '--address=0.0.0.0', '--allow-websocket-origin=signaltrain.herokuapp.com','--use-xheaders','bokeh_sliders.py'], cwd="./demo", stdout=subprocess.PIPE)
+    ['bokeh', 'serve', '--allow-websocket-origin=signaltrain.herokuapp.com','--use-xheaders','bokeh_sliders.py'], cwd="./demo", stdout=subprocess.PIPE)
 
 @atexit.register
 def kill_server():
