@@ -35,7 +35,7 @@ def save_checkpoint(checkpointname, model, epoch, parallel, optimizer, effect, s
     torch.save(state, checkpointname)
 
 
-def load_checkpoint(checkpointname, fatal=False):
+def load_checkpoint(checkpointname, fatal=False, device="cuda"):
     """
     load up the checkpoint if it exists
     for backwards-compatibility: guess some common run parameters if they're not in the checkpoint
@@ -44,7 +44,7 @@ def load_checkpoint(checkpointname, fatal=False):
 
     if os.path.isfile(checkpointname):
         print("\n***** Checkpoint file found. Loading weights.")
-        checkpoint = torch.load(checkpointname) # map_location=device)
+        checkpoint = torch.load(checkpointname, map_location=device)
         state_dict = checkpoint['state_dict']
 
         # Guess some typical run values in case they're not in the checkpoint file
