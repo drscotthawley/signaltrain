@@ -30,7 +30,7 @@ def core_modulation(freq_subbands, window_size):
             cos_an[k, n] = w[n] * np.cos(np.pi / freq_subbands * (k + 0.5) *
                                          (n + 0.5 + freq_subbands / 2)) * np.sqrt(2./freq_subbands)
 
-    return cos_an.astype(np.float32)
+    return cos_an
 
 
 def tied_transform(analysis, x_ft, hop):
