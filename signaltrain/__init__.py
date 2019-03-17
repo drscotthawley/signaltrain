@@ -1,5 +1,5 @@
 from . import audio
-from . import data
+from . import datasets
 from . import io_methods
 from . import learningrate
 from . import loss_functions

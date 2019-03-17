@@ -39,7 +39,7 @@ if __name__ == "__main__":
     parser.add_argument('--sr', type=int, help='Sampling rate', default=44100)
     parser.add_argument('--scale', type=float, help='Scale factor (of input size & whole model)', default=1.0)
     parser.add_argument('--shrink', type=int, help='Shink output chunk relative to input by this divisor', default=4)
-    parser.add_argument('--synthprob', type=float, help="TODO: UNUSED. When input files present (in --path), probability of synthesizing fresh input signals too (ignored if no input files)", default=0.5)
+    parser.add_argument('--apex', help="optimization setting to use with NVIDIA apex", default="O0")
     args = parser.parse_args()
 
     # print command line as it was invoked (for reading nohup.out later)
@@ -56,6 +56,8 @@ if __name__ == "__main__":
         effect = st.audio.Compressor_4c()
     elif e == 'comp':
         effect = st.audio.Compressor()
+    elif e == 'denoise':
+        effect = st.audio.Denoise()
     elif e == 'lowpass':
         effect = st.audio.LowPass()
     elif 'VST' in e:
@@ -84,6 +86,6 @@ if __name__ == "__main__":
     # call the trianing routine
     st.train.train(epochs=args.epochs, n_data_points=args.num, batch_size=args.batch, device=device, sr=args.sr,\
         effect=effect, datapath=args.path, scale_factor=args.scale, shrink_factor=args.shrink,
-        synth_prob=args.synthprob)
+        apex_opt=args.apex)
 
 # EOF
