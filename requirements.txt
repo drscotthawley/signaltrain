@@ -7,3 +7,4 @@ scipy==1.2.0
 http://download.pytorch.org/whl/cpu/torch-1.0.0-cp36-cp36m-linux_x86_64.whl
 bokeh==1.0.4
 gunicorn==19.9.0
+flask==1.0.2 
