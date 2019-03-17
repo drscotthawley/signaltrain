@@ -25,7 +25,7 @@ except ImportError:
 
 def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_size=20,
     device=torch.device("cuda:0"), plot_every=10, cp_every=25, sr=44100, datapath=None,
-    scale_factor=1, shrink_factor=4, synth_prob=0.5):
+    scale_factor=1, shrink_factor=4, apex_opt="O0"):
     """
     Main training routine for signaltrain
 
@@ -39,13 +39,14 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
         cp_every:         save checkpoint every this many iterations
         scale_factor:     change overal dimensionality of i/o chunks by this factor
         shrink_factor:    output shrink factor, i.e. fraction of output actually trained on
-        synth_prob:       TODO: unused. might use it to combine on-the-fly data-gen with files
+        apex_opt:         option for apex multi-precision training. default is "O0" which means none
+                          For Turing cards (e.g. RTX 2080 Ti), set this to "O2"
     """
 
     # print info about this training run
     print(f'SignalTrain training execution began at {time.ctime()}. Options:')
     print(f'    epochs = {epochs}, n_data_points = {n_data_points}, batch_size = {batch_size}')
-    print(f'    scale_factor = {scale_factor}, shrink_factor = {shrink_factor}')
+    print(f'    scale_factor = {scale_factor}, shrink_factor = {shrink_factor}, apex_opt = {apex_opt}')
     num_knobs = len(effect.knob_names)
     print(f'    num_knobs = {num_knobs}')
     effect.info()  # Print effect settings
@@ -94,7 +95,7 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
     # mixed precision
     # Initialize Amp.  Amp accepts either values or strings for the optional override arguments,
     # for convenient interoperation with argparse.
-    model, optimizer = amp.initialize(model, optimizer, opt_level="O2")
+    model, optimizer = amp.initialize(model, optimizer, opt_level=apex_opt)
 
 
     # Copy model to (other) GPU if possbible
