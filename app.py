@@ -18,8 +18,9 @@ if local:
     bokeh_process = subprocess.Popen(
         ['bokeh', 'serve',f'--allow-websocket-origin=localhost:{port}','bokeh_sliders.py'], cwd='./demo', stdout=subprocess.PIPE)
 else:
+    port = os.environ['PORT']
     bokeh_process = subprocess.Popen(
-        ['bokeh', 'serve','--allow-websocket-origin=signaltrain.herokuapp.com','bokeh_sliders.py'], cwd='./demo', stdout=subprocess.PIPE)
+        ['bokeh', 'serve',f'--allow-websocket-origin=signaltrain.herokuapp.com:{port}','--use-xheaders','bokeh_sliders.py'], cwd='./demo', stdout=subprocess.PIPE)
 
 @atexit.register
 def kill_server():
