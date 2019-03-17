@@ -1,17 +1,24 @@
 #app.py
-# This is for deploying the demo to Heroku
+# this is for deploying the demo to Heroku
 import subprocess
 import atexit
-from flask import render_template, Flask
+from flask import render_template, render_template_string, Flask
+from bokeh.client import pull_session
 import os
+os.chdir('demo')
+
 
 template_dir = os.path.abspath('./demo')
 app = Flask(__name__, template_folder=template_dir)
 
-#port = os.environ['PORT']  # Heroku requires that you use $PORT
-bokeh_process = subprocess.Popen(
-#    ['bokeh', 'serve',f'--port={port}', '--address=0.0.0.0', '--allow-websocket-origin=signaltrain.herokuapp.com','--use-xheaders','bokeh_sliders.py'], cwd="./demo", stdout=subprocess.PIPE)
-    ['bokeh', 'serve', '--allow-websocket-origin=signaltrain.herokuapp.com','--use-xheaders','bokeh_sliders.py'], cwd="./demo", stdout=subprocess.PIPE)
+local = False
+if local:
+    port = 8000
+    bokeh_process = subprocess.Popen(
+        ['bokeh', 'serve',f'--allow-websocket-origin=localhost:{port}','bokeh_sliders.py'], cwd='demo', stdout=subprocess.PIPE)
+else:
+    bokeh_process = subprocess.Popen(
+        ['bokeh', 'serve','--allow-websocket-origin=signaltrain.herokuapp.com','bokeh_sliders.py'], cwd='demo', stdout=subprocess.PIPE)
 
 @atexit.register
 def kill_server():
@@ -19,8 +26,11 @@ def kill_server():
 
 @app.route("/")
 def index():
+    #session=pull_session(app_path="demo/")
+    #bokeh_script=autoload_server(None,app_path="/demo",session_id=session.id)
+    #return render_template("index.html")#, bokeh_script=bokeh_script)
     return render_template('index.html')
 
 if __name__ == "__main__":
-    print("Starting app")
+    print("STARTED")
     app.run(debug=True)
