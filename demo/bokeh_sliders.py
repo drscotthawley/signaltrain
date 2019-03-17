@@ -46,8 +46,10 @@ def get_input_sample(chooser, in_chunk_size=8192):
         return st.audio.box(t, delta=0)
     elif 'noisy sine' == chooser:
         return st.audio.randsine(t,freq_range=[5,20]) + 0.1*(2*np.random.rand(t.shape[0])-1)
-    elif 'noisybox' == chooser:
+    elif 'box * noise' == chooser:
         return st.audio.box(t) * (2*np.random.rand(t.shape[0])-1)
+    elif 'box + noise' == chooser:
+        return st.audio.box(t) + 0.5*np.random.rand()*(2*np.random.rand(t.shape[0])-1)
     elif 'pluck' == chooser:
         return st.audio.pluck(t)
     elif 'real audio' == chooser:
@@ -92,7 +94,7 @@ effects_dict = dict()
 effects_dict['comp_4c'] = {'name':'4-Knob Compressor', 'effect':st.audio.Compressor_4c(), 'checkpoint':'model_comp4c_4k.tar'}
 # other effects to enable later:
 #effects_dict['comp_3c'] = {'name':'3-Knob Compressor', 'effect':st.audio.Compressor(),    'checkpoint':'model_comp3c_4k.tar'}
-#effects_dict['denoise'] = {'name':'Denoiser',          'effect':None,      'checkpoint':'modelcheckpoint_denoise.tar'} # don't link in audio.Denoise()
+effects_dict['denoise'] = {'name':'(Tunable) Denoiser',          'effect':st.audio.Denoise(),      'checkpoint':'modelcheckpoint_denoise.tar'} # don't link in audio.Denoise()
 #effects_dict['decomp_4c'] = {'name':'4-Knob De-Compressor', 'effect':None, 'checkpoint':''} # do not try to use decompressor effect
 effects_dict['nothing'] = {'name':'Nothing (for testing)', 'effect':None,  'checkpoint':''}
 shortname = 'comp_4c'   # select default effect
@@ -151,7 +153,7 @@ plot.legend.background_fill_alpha = 0.5
 # Set up widgets
 effect_options = [effects_dict[x]['name'] for x in effects_dict.keys()]
 effect_select = Select(title="Effect:", value=effect_options[0], options=effect_options)
-input_select = Select(title="Input Signal:      (randomly gen'd on change)", value="box", options=['box','sine','pluck','noisybox','noisy sine']) #TODO: add ,'real audio'])
+input_select = Select(title="Input Signal:      (randomly gen'd on change)", value="box", options=['box','sine','pluck','box * noise','noisy sine','box + noise']) #TODO: add ,'real audio'])
 knob_sliders = []
 for k in range(num_knobs):
     start, end = knob_ranges[k][0], knob_ranges[k][1]
@@ -166,6 +168,8 @@ def update_data(attrname, old, new):
     global t, x, y
     plot.title.text = "sample data"
 
+    source.data = dict(x=t[-show_size:], y=x[-show_size:])
+
     # Get the current slider values
     knobs_wc = []
     if num_knobs > 0 :
@@ -173,11 +177,8 @@ def update_data(attrname, old, new):
             knobs_wc.append( knob_sliders[k].value)
 
     # generate the new target curve, if possible
-    if effect is not None:
+    if (effect is not None) and ('De' not in effect.name): # don't update x for de- effects. (even though we should; but doing so makes the demo behave funny)
         y, x_tmp = effect.go_wc(x, knobs_wc)
-        if 'De' not in effect.name: # don't update x for de- effects. (even though we should; but doing so makes the demo behave funny)
-            x = x_tmp
-        source.data = dict(x=t[-show_size:], y=x[-show_size:])
         source2.data = dict(x=t[-show_size:], y=y[-show_size:])
     else:
         source2.data = dict(x=t[0:1], y=0*t[0:1])  # effectively remove the display of data for this one
