@@ -91,12 +91,12 @@ def setup_model(checkpoint_file, fatal=True):
 
 # Set up list of effects. written generally so we can add other effects later
 effects_dict = dict()
-effects_dict['comp_4c'] = {'name':'4-Knob Compressor', 'effect':st.audio.Compressor_4c(), 'checkpoint':'model_comp4c_4k.tar'}
+effects_dict['comp_4c'] = {'name':'Comp-4c: 4-Knob Compressor', 'effect':st.audio.Compressor_4c(), 'checkpoint':'model_comp4c_4k.tar'}
 # other effects to enable later:
 #effects_dict['comp_3c'] = {'name':'3-Knob Compressor', 'effect':st.audio.Compressor(),    'checkpoint':'model_comp3c_4k.tar'}
-effects_dict['denoise'] = {'name':'(Tunable) Denoiser',          'effect':st.audio.Denoise(),      'checkpoint':'modelcheckpoint_denoise.tar'} # don't link in audio.Denoise()
+effects_dict['denoise'] = {'name':'Extra: (Tunable) Denoiser',          'effect':st.audio.Denoise(),      'checkpoint':'modelcheckpoint_denoise.tar'} # don't link in audio.Denoise()
 #effects_dict['decomp_4c'] = {'name':'4-Knob De-Compressor', 'effect':None, 'checkpoint':''} # do not try to use decompressor effect
-effects_dict['nothing'] = {'name':'Nothing (for testing)', 'effect':None,  'checkpoint':''}
+#effects_dict['nothing'] = {'name':'Nothing (for testing)', 'effect':None,  'checkpoint':''}
 shortname = 'comp_4c'   # select default effect
 
 # read and parse the checkpoint fileself
