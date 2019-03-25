@@ -70,12 +70,18 @@ def gen_one_io_pair(name, t, x, sr, effect, settings_per, log_interval, infile_l
         clip_len = len(x)                         # signal length is stored in x from earlier
 
         x, sr = st.audio.read_audio_file(infilename, sr=sr, dtype=dtype) # overwrite x by reading audio
+
         # but only use a random subset of x, given by len(t) (which was set by --dur)
 
-        randi = random.randint(0, x.shape[0]-clip_len-1)
+        # grab a random part of the file
+        if clip_len >= len(x):  # unless there's not enough audio in the file to justify this
+            randi = 0
+            clip_len = len(x)
+        else:
+            randi = random.randint(0, x.shape[0]-clip_len-1) # random index at which to start the clip
         x = x[randi:randi+clip_len]
 
-        # destination output dir
+        # destination output dir: base it on what's the input path
         if 'Train' in infilename:
             outpath += 'Train/'
         elif 'Val' in infilename:
@@ -100,7 +106,7 @@ def gen_one_io_pair(name, t, x, sr, effect, settings_per, log_interval, infile_l
             if tmpmax > 1.0:
                 x[ibgn:iend] /= tmpmax
 
-        # and decide where to send it
+        # and decide where to send it (for synthesized audio)
         if outfile_i/num_outfiles > 0.8:
             outpath += 'Val/'
         else:
@@ -159,11 +165,11 @@ def gen_synth_data(args):
         effect = st.audio.Compressor_4c()
     elif 'comp' == args.effect:
         effect = st.audio.Compressor()
+    elif 'comp_t' == args.effect:
+        effect = st.audio.Comp_Just_Thresh()
     else:
         print("Sorry, not set up to work for other effects")
         sys.exit(1)
-
-    # create an effect_info.ini file in the new dataset directory
 
     train_val_split = 0.8  # between 0 and 1, below number will be train, rest will be val 0.8 means 80-20 split
     if settings_per is not None:  # evenly cover knob values in Train
@@ -200,7 +206,9 @@ def gen_synth_data(args):
     # If input files are specified via --inpath
     infile_list = None
     if inpath != None:
-        infile_list = glob.glob(inpath+"/*/*")
+        infile_list = glob.glob(inpath+"/*.wav")
+        infile_list += glob.glob(inpath+"/*/*.wav")
+        infile_list = [ x for x in infile_list if "target" not in x ]  # remove any 'target' audio
         print("\ninfile_list =",infile_list)
     else:
         print("Number of ",clip_length,"-length clips per synthesized input file: ",num_clips,sep="")

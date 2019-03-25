@@ -15,6 +15,7 @@ import glob
 #import io_methods
 from scipy.io import wavfile
 import configparser  # for reading file-based effect datasets
+import warnings
 
 def random_ends(size=1): # probabilty dist. that emphasizes boundaries
     return np.random.beta(0.8,0.8,size=size)
@@ -183,32 +184,52 @@ def triangle(t, randfunc=np.random.rand, t0_fac=None): # ramp up then down
     return x + amp_n*pinknoise(t.shape[0])
 
 
-def read_audio_file(filename, sr=44100, mono=True, norm=False, dtype=np.float32):
+# Prelude to read_audio_file
+# Tried lots of ways of doing this.. most are slow.
+#signal, rate = librosa.load(filename, sr=sr, mono=True, res_type='kaiser_fast') # Librosa's reader is incredibly slow. do not use
+#signal, rate = torchaudio.load(filename)#, normalization=True)   # Torchaudio's reader is pretty fast but normalization is a problem
+#signal = signal.numpy().flatten()
+#reader = io_methods.AudioIO   # Stylios' file reader. Haven't gotten it working yet
+#signal, rate = reader.audioRead(filename, mono=True)
+#signal, rate = sf.read('existing_file.wav')
+def read_audio_file(filename, sr=44100, mono=True, norm=False, device='cpu', dtype=np.float32):
     """
     Generic wrapper for reading an audio file.
     Different libraries offer different speeds for this, so this routine is the
     'catch-all' for whatever read routine happens to work best
+
+    Tries a fast method via scipy first, reverts to slower librosa when necessary.
     """
-    #signal, sr = librosa.load(filename, sr=sr, mono=True, res_type='kaiser_fast') # Librosa's reader is incredibly slow. do not use
+    # first try to read via scipy, because it's fast
+    scipy_ok = False
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("error")    # scipy throws warnings which should be errors
+        try:
+            out_sr, signal = wavfile.read(filename)
+            scipy_ok = True
+        except wavfile.WavFileWarning:
+            print("read_audio_file: Warning raised by scipy. ",end="")
 
-    #signal, sr = torchaudio.load(filename)#, normalization=True)   # Torchaudio's reader is pretty fast but normalization is a problem
-    #signal = signal.numpy().flatten()
+    if scipy_ok:
+        if mono and (len(signal.shape) > 1):     # convert to mono
+            signal = signal[:,0]
 
-    #reader = io_methods.AudioIO   # Stylios' file reader. Haven't gotten it working yet
-    #signal, sr = reader.audioRead(filename, mono=True)
+        if isinstance(signal[0], np.int16):      # convert from ints to floats if necessary
+            signal = np.array(signal, dtype=dtype)/32767.0   # change from [-32767..32767] to [-1..1]
 
-    sr, signal = wavfile.read(filename)      # scipy works fine and is fast
-    if mono and (len(signal.shape) > 1):     # convert to mono
-        signal = signal[:,0]
+        if out_sr != int(sr):
+            print(f"read_audio_file: Got sample rate of {rate} Hz instead of {sr} Hz requested. Resampling.")
+            signal = librosa.resample(signal, rate*1.0, sr*1.0, res_type='kaiser_fast')
 
-    if isinstance(signal[0], np.int16): # but some files are ints and should be floats (this conversion slows things down)
-        signal = np.array(signal, dtype=dtype)/32767.0   # change from [-32767..32767] to [-1..1]
+    else:                                         # try librosa; it's slower but general
+        print("Trying librosa.")
+        signal, out_sr = librosa.core.load(filename, mono=mono, sr=sr, res_type='kaiser_fast')
 
     if norm:
         signal = signal/np.max(np.abs(signal))
 
+    return signal.astype(dtype), out_sr
 
-    return signal, sr
 
 def write_audio_file(filename, data, sr=44100):
     wavfile.write(filename, sr, data)
@@ -415,7 +436,7 @@ class Effect():
     # Effects should also define a 'go_wc' method which executes the effect, mapping input and knobs_nn to output y, x
     #   We return x as well as y, because some effects may reverse x & y (e.g. denoiser)
     def go_wc(self, x, knobs_wc):
-        print("Warning: This effect's go_wc() is undefined")  # little hint left for the programmer ;-)
+        raise Exception("This effect's go_wc() is undefined")
 
     # this is the 'main' interface typically called during training & inference, using normalized knob values [-.5,.5]
     def go(self, x, knobs_nn, **kwargs):
@@ -441,6 +462,24 @@ class Compressor_4c(Effect):  # compressor with 4 controls
         self.knob_ranges = np.array([[-30,0], [1,5], [1e-3,4e-2], [1e-3,4e-2]])
     def go_wc(self, x, knobs_w):
         return compressor_4controls(x, thresh=knobs_w[0], ratio=knobs_w[1], attackTime=knobs_w[2], releaseTime=knobs_w[3], sr=self.sr), x
+
+
+class Comp_Just_Thresh(Effect):  # compressor with just threshold
+    """
+    Purpose of this effect: used for comparison vs (analog) LA2A
+    """
+    def __init__(self, **kwargs):
+        super(Comp_Just_Thresh, self, **kwargs).__init__()
+        self.name = 'Comp_Just_Thresh'
+        self.knob_names = ['threshold']
+        self.knob_ranges = np.array([[-30,0]])
+        self.ratio = 3.0
+        self.attack = .05 # 50ms
+        self.release = 1.0 # 1 second!
+    def go_wc(self, x, knobs_w):
+        return compressor_4controls(x, thresh=knobs_w[0], ratio=self.ratio, attackTime=self.attack, releaseTime=self.release, sr=self.sr), x
+
+
 
 class Echo(Effect):
     def __init__(self, **kwargs):

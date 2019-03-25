@@ -12,14 +12,16 @@ import time
 from signaltrain import audio, io_methods, learningrate, datasets, loss_functions, misc
 from signaltrain.nn_modules import nn_proc
 
-
-try:   # NVIDIA Apex for mixed-precision training
+# NVIDIA Apex for mixed-precision training
+have_apex = False
+try:
     from apex.parallel import DistributedDataParallel as DDP
     from apex.fp16_utils import *
     from apex import amp, optimizers
     from apex.multi_tensor_apply import multi_tensor_applier
+    have_apex = True
 except ImportError:
-    raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this code.")
+    print("Recommend that you install apex from https://www.github.com/nvidia/apex to run this code.")
 
 
 
@@ -74,11 +76,11 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
 
     # Setup/load data
     if synth_data:  # synthesize data  # TODO: warning: broke this a while ago in favor of using files.
-        dataset = datasets.SynthAudioDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points, y_size=out_chunk_size)
-        dataset_val = datasets.SynthAudioDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4, recycle=True, y_size=out_chunk_size)
+        dataset = datasets.SynthAudioDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points, y_size=out_chunk_size, augment=True)
+        dataset_val = datasets.SynthAudioDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4, recycle=True, y_size=out_chunk_size, augment=False)
     else: # use files
-        dataset = datasets.AudioFileDataSet(chunk_size, effect, sr=sr,  datapoints=n_data_points, path=datapath+"/Train/",  y_size=out_chunk_size, rerun=False)
-        dataset_val = datasets.AudioFileDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4, path=datapath+"/Val/", y_size=out_chunk_size, rerun=False)
+        dataset = datasets.AudioFileDataSet(chunk_size, effect, sr=sr,  datapoints=n_data_points, path=datapath+"/Train/",  y_size=out_chunk_size, rerun=False, augment=True)
+        dataset_val = datasets.AudioFileDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4, path=datapath+"/Val/", y_size=out_chunk_size, rerun=False, augment=False)
 
     dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=10, shuffle=True, worker_init_fn=datasets.worker_init) # need worker_init for more variance
     dataloader_val = DataLoader(dataset_val, batch_size=batch_size, num_workers=10, shuffle=False)
@@ -95,7 +97,8 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
     # mixed precision
     # Initialize Amp.  Amp accepts either values or strings for the optional override arguments,
     # for convenient interoperation with argparse.
-    model, optimizer = amp.initialize(model, optimizer, opt_level=apex_opt)
+    if have_apex:
+        model, optimizer = amp.initialize(model, optimizer, opt_level=apex_opt)
 
 
     # Copy model to (other) GPU if possbible
@@ -157,21 +160,21 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
             # Optimization
             optimizer.zero_grad()
 
-            #loss.backward()   # replace this with amp call
-            with amp.scale_loss(loss, optimizer) as scaled_loss:
-                scaled_loss.backward()
-            torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), max_norm=1., norm_type=1)
-
-            # Clip model norm
-            '''
-            if parallel:
-                for child in model.children():  # for DataParallel
-                    if hasattr(child, 'clip_grad_norm_'):
-                        child.clip_grad_norm_()
+            if have_apex:
+                with amp.scale_loss(loss, optimizer) as scaled_loss:
+                    scaled_loss.backward()
+                torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), max_norm=1., norm_type=1)
             else:
-                if hasattr(model, 'clip_grad_norm_'):
-                    model.clip_grad_norm_(optimizer)   # for non-DataParallel
-            '''
+                loss.backward()   # replace this with amp call
+
+                # Clip model norm
+                if parallel:
+                    for child in model.children():  # for DataParallel
+                        if hasattr(child, 'clip_grad_norm_'):
+                            child.clip_grad_norm_()
+                else:
+                    if hasattr(model, 'clip_grad_norm_'):
+                        model.clip_grad_norm_(optimizer)   # for non-DataParallel
 
             optimizer.step()
 

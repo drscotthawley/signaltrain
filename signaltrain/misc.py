@@ -64,3 +64,14 @@ def load_checkpoint(checkpointname, fatal=False, device="cuda"):
         sys.exit(1)
 
     return state_dict, rv
+
+
+def print_model_params(model):
+    print("Printing model parameters")
+    total_params = 0
+    for child in model.children():
+        for childchild in child.children():
+            for ccc in childchild.children():
+                cpcount = sum(p.numel() for p in ccc.parameters() if p.requires_grad)
+                total_params += cpcount
+                print(f"    {child}: {cpcount} parameters.     Total params = {total_params}.")
