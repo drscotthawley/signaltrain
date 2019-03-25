@@ -16,6 +16,39 @@ from torch.utils.data import Dataset
 from . import audio
 
 
+def do_augment(x,y, rand_invert=True, mult_some=False, add_some=True):
+    """
+    A few simple hacks for data augmentation, to make the dataset go further.
+    Nothing fancy: Don't want to mess up the target data if this is a file-based dataset.
+    Note that time translations are effectively already handled by the data generators (below).
+    """
+    if rand_invert and np.random.choice([True,False]):
+        # randomly flip phases of both input & target
+        x, y = -x, -y
+
+    # Below are ugmentations that only affect the lookback part of the input x
+    lookback = x.size - y.size
+
+    if mult_some and np.random.choice([True,False]):
+        # like "cutout" or "salt & pepper". here we randomly multiply isolated samples by random factors.
+        # NOTE: this will end up adding lots of high-freq info in the STFT and may not be adviseable.
+        fraction = 0.2 # mess with this fraction of number of samples in the lookback window
+        n = int(lookback * fraction)                     # number of samples to modify
+        indices = np.random.randint(0, high=lookback, size=n) # indices where mod will occur
+        mults = (2*np.random.rand(n)-1).astype(x.dtype)  # random multiplicative factor [-1..1]
+        x[indices] = x[indices] * mults
+
+    if add_some and np.random.choice([True,False]):
+        # similar to mult_some, but we add verrry small noise to some points
+        fraction = 0.3
+        n = int(lookback * fraction)                     # number of samples to modify
+        indices = np.random.randint(0, high=lookback, size=n)
+        tiny_fac = np.max(x) / 1e6
+        adds = ( tiny_fac*(2*np.random.rand(n)-1) ).astype(x.dtype)
+        x[indices] = x[indices] + adds
+    return x, y
+
+
 def worker_init(worker_id):
     """
     used with PyTorch DataLoader so that we can grab random bits of files or
@@ -31,7 +64,7 @@ class AudioFileDataSet(Dataset):
     Read from premade audio files.  Is a subclass of PyTorch Dataset so you can use DataLoader
     """
     def __init__(self, chunk_size, effect, sr=44100, path="./Train/", datapoints=8000, \
-        dtype=np.float32, preload=True, skip_factor=0, rerun=False, y_size=None, rand_invert=True):
+        dtype=np.float32, preload=True, skip_factor=0, rerun=False, y_size=None, augment=True):
         super(AudioFileDataSet, self).__init__()
 
         self.chunk_size = chunk_size
@@ -47,7 +80,7 @@ class AudioFileDataSet(Dataset):
             self.y_size = chunk_size
         else:
             self.y_size = y_size
-        self.rand_invert = rand_invert   # data augmentation: randomly invert phase
+        self.augment = augment   # data augmentation: randomly invert phase
         self.processed_dir = ''
         self.num_knobs = 0
         '''
@@ -74,8 +107,8 @@ class AudioFileDataSet(Dataset):
             self.preload_audio()
 
     def preload_audio(self):
-        print("    Preloading audio files for this dataset...")
-        files_to_load = min(20000, self.datapoints//5, len(self.input_filenames))   # min to avoid memory errors
+        print("    Preloading audio files for this dataset...")  # alternative is to have workers do it at each epoch: saves memory but is slower
+        files_to_load = min(100000, len(self.input_filenames))   # min / trap to avoid memory errors
         audio_in, audio_targ, knobs_wc = self.read_one_new_file_pair()  # read one file for sizing
         self.num_knobs = len(knobs_wc)
         self.x = np.zeros((files_to_load,len(audio_in) ),dtype=self.dtype)
@@ -182,8 +215,8 @@ class AudioFileDataSet(Dataset):
         kr = self.effect.knob_ranges   # kr is abbribation for 'knob ranges'
         knobs_nn = (knobs_wc - kr[:,0])/(kr[:,1]-kr[:,0]) - 0.5
 
-        if self.rand_invert and np.random.choice([True,False]): # randomly flip phase for data augmentation
-            x_item, y_item = -x_item, -y_item
+        if self.augment:
+            x_item, y_item = do_augment(x_item, y_item)
 
         return x_item.astype(self.dtype), y_item.astype(self.dtype), knobs_nn.astype(self.dtype)
 
@@ -208,7 +241,7 @@ class SynthAudioDataSet(Dataset):
        See https://pytorch.org/docs/stable/notes/faq.html#dataloader-workers-random-seed
     """
     def __init__(self, chunk_size,  effect, sr=44100, datapoints=8000, dtype=np.float32,
-        recycle=False, y_size=None, rand_invert=True):
+        recycle=False, y_size=None, augment=True):
         super(SynthAudioDataSet, self).__init__()
         self.chunk_size = chunk_size
         self.effect = effect
@@ -218,7 +251,7 @@ class SynthAudioDataSet(Dataset):
         self.recycle = recycle
         self.num_knobs = len(effect.knob_names)
         self.y_size = chunk_size if (y_size is None) else y_size
-        self.rand_invert = rand_invert   # data augmentation: randomly invert phase
+        self.augment = augment   # data augmentation: randomly invert phase
 
         # preallocate an array of time values across one chunk for use with audio synth functions
         self.t = np.arange(chunk_size, dtype=np.float32) / sr
@@ -261,8 +294,8 @@ class SynthAudioDataSet(Dataset):
 
         y = y[-self.y_size:]    # shrink output size
 
-        if self.rand_invert and np.random.choice([True,False]): # randomly flip phase for data augmentation
-            x, y = -x, -y
+        if self.augment:
+            x, y = do_augment(x, y)
 
         return x, y, knobs
 

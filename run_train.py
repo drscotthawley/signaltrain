@@ -56,6 +56,8 @@ if __name__ == "__main__":
         effect = st.audio.Compressor_4c()
     elif e == 'comp':
         effect = st.audio.Compressor()
+    elif e == 'comp_t':
+        effect = st.audio.Comp_Just_Thresh()
     elif e == 'denoise':
         effect = st.audio.Denoise()
     elif e == 'lowpass':
