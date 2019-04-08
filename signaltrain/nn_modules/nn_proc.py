@@ -11,13 +11,15 @@ from .cls_fe_dft import Analysis, Synthesis
 torch.backends.cudnn.benchmark = True   # makes Turing GPU ops faster! https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936/3
 
 
-def freeze_layer(layer):
- for param in layer.parameters():
-  param.requires_grad = False
+def freeze_layers(layers):
+    for layer in layers:
+        for param in layer.parameters():
+            param.requires_grad = False
 
-def unfreeze_layer(layer):
- for param in layer.parameters():
-  param.requires_grad = True
+def unfreeze_layers(layers):
+    for layer in layers:
+        for param in layer.parameters():
+            param.requires_grad = True
 
 
 class AsymAutoEncoder(nn.Module):
@@ -202,18 +204,20 @@ class st_model(nn.Module):
             print(f"    Setting out_chunk_size = y_size = {y_size}")
         self.out_chunk_size = y_size
         self.mpaec = AsymMPAEC(expected_time_frames, ft_size=ft_size, hop_size=hop_size, n_knobs=num_knobs, output_tf=output_time_frames)
-        #self.freeze()
-
-    def freeze(self):
-        freeze_layer(self.mpaec.dft_analysis)
-        freeze_layer(self.mpaec.dft_synthesis)
-
-    def unfreeze(self):
-        unfreeze_layer(self.mpaec.dft_analysis)
-        unfreeze_layer(self.mpaec.dft_synthesis)
+        #self.freeze()    # TODO: try this out another time
 
     def clip_grad_norm_(self):
         self.mpaec.clip_grad_norm_()
 
     def forward(self, x_cuda, knobs_cuda):
         return self.mpaec.forward(x_cuda, knobs_cuda)
+
+    '''# not quite ready for this.
+    def freeze(self):
+        freeze_layers([self.mpaec.dft_analysis, self.mpaec.dft_synthesis])
+
+    def unfreeze(self):
+        unfreeze_layers([self.mpaec.dft_analysis, self.mpaec.dft_synthesis])
+    '''
+
+# EOF
