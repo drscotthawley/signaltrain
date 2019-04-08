@@ -109,19 +109,19 @@ class AudioFileDataSet(Dataset):
     def preload_audio(self):
         # This is much faster than reading files anew each epoch, but comes at the cost of assuming a uniform dataset.
         # Alternative is to have workers load files at each epoch: that saves memory but is WAY slower that preloading
-        print("    Preloading audio files for this dataset. **WARNING: This assumes all files are the same duration**")
+        print("    Preloading audio files for this dataset...")
         files_to_load = min(100000, len(self.input_filenames))   # min / trap to avoid memory errors
         audio_in, audio_targ, knobs_wc = self.read_one_new_file_pair()  # read one file for sizing
         dur = len(audio_in)/self.sr
-        print(f"        Sample audio file has {len(audio_in)} samples = {dur} seconds. Assuming all others are the same size.")
         self.num_knobs = len(knobs_wc)
         self.x = np.zeros((files_to_load,len(audio_in) ),dtype=self.dtype)
         self.y = np.zeros((files_to_load,len(audio_targ) ),dtype=self.dtype)
         self.knobs = np.zeros((files_to_load, self.num_knobs ),dtype=self.dtype)
         for i in range(files_to_load):
-            if ((i+1) % 100 == 0) or (i+1 == files_to_load):
-                print("\r       i = ",i+1,"/",files_to_load,sep="",end="")
             tmp_x, tmp_y,  self.knobs[i] = self.read_one_new_file_pair(idx=i)
+            if ((i+1) % (files_to_load//10) == 0) or (i+1 == files_to_load):
+                print("\r       i = ",i+1,"/",files_to_load," len =",len(tmp_x), "dur=",len(tmp_x)/44100.0/60," min")
+
             if self.effect.is_inverse:
                 tmp_x, tmp_y = tmp_y, tmp_x         # for effects that reverse 'input' and 'output' (for de-____ effects)
 
@@ -171,8 +171,8 @@ class AudioFileDataSet(Dataset):
         if idx is None:
             idx = np.random.randint(0,high=len(self.input_filenames)) # pick a file at random
 
-        audio_in, sr = audio.read_audio_file(self.input_filenames[idx], sr=self.sr)
-        audio_targ, sr = audio.read_audio_file(self.target_filenames[idx], sr=self.sr)
+        audio_in, sr = audio.read_audio_file(self.input_filenames[idx], sr=self.sr, fix_and_overwrite=True)
+        audio_targ, sr = audio.read_audio_file(self.target_filenames[idx], sr=self.sr, fix_and_overwrite=True)
 
         # parse knobs from target filename
         knobs_wc = self.parse_knob_string(self.target_filenames[idx])
