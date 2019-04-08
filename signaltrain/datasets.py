@@ -117,9 +117,10 @@ class AudioFileDataSet(Dataset):
         self.x = np.zeros((files_to_load,len(audio_in) ),dtype=self.dtype)
         self.y = np.zeros((files_to_load,len(audio_targ) ),dtype=self.dtype)
         self.knobs = np.zeros((files_to_load, self.num_knobs ),dtype=self.dtype)
+        print_every = files_to_load//10 if 0!= files_to_load//10 else 1
         for i in range(files_to_load):
             tmp_x, tmp_y,  self.knobs[i] = self.read_one_new_file_pair(idx=i)
-            if ((i+1) % (files_to_load//10) == 0) or (i+1 == files_to_load):
+            if ((i+1) % print_every == 0) or (i+1 == files_to_load):
                 print("\r       i = ",i+1,"/",files_to_load," len =",len(tmp_x), "dur=",len(tmp_x)/44100.0/60," min")
 
             if self.effect.is_inverse:
