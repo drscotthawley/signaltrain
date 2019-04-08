@@ -192,7 +192,7 @@ def triangle(t, randfunc=np.random.rand, t0_fac=None): # ramp up then down
 #reader = io_methods.AudioIO   # Stylios' file reader. Haven't gotten it working yet
 #signal, rate = reader.audioRead(filename, mono=True)
 #signal, rate = sf.read('existing_file.wav')
-def read_audio_file(filename, sr=44100, mono=True, norm=False, device='cpu', dtype=np.float32, warn=True):
+def read_audio_file(filename, sr=44100, mono=True, norm=False, device='cpu', dtype=np.float32, warn=True, fix_and_overwrite=False):
     """
     Generic wrapper for reading an audio file.
     Different libraries offer different speeds for this, so this routine is the
@@ -226,6 +226,9 @@ def read_audio_file(filename, sr=44100, mono=True, norm=False, device='cpu', dty
         if warn:
             print("Trying librosa.")
         signal, out_sr = librosa.core.load(filename, mono=mono, sr=sr, res_type='kaiser_fast')
+        if fix_and_overwrite:           # so that we don't have to do this again
+            print(f"    Overwriting {filename} (so we don't have to use librosa again)")
+            write_audio_file(filename, signal, out_sr)
 
     if signal.dtype != dtype:
         signal = signal.astype(dtype, copy=False)
