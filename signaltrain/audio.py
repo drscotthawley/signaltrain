@@ -192,7 +192,7 @@ def triangle(t, randfunc=np.random.rand, t0_fac=None): # ramp up then down
 #reader = io_methods.AudioIO   # Stylios' file reader. Haven't gotten it working yet
 #signal, rate = reader.audioRead(filename, mono=True)
 #signal, rate = sf.read('existing_file.wav')
-def read_audio_file(filename, sr=44100, mono=True, norm=False, device='cpu', dtype=np.float32):
+def read_audio_file(filename, sr=44100, mono=True, norm=False, device='cpu', dtype=np.float32, warn=True):
     """
     Generic wrapper for reading an audio file.
     Different libraries offer different speeds for this, so this routine is the
@@ -208,7 +208,8 @@ def read_audio_file(filename, sr=44100, mono=True, norm=False, device='cpu', dty
             out_sr, signal = wavfile.read(filename)
             scipy_ok = True
         except wavfile.WavFileWarning:
-            print("read_audio_file: Warning raised by scipy. ",end="")
+            if warn:
+                print("read_audio_file: Warning raised by scipy. ",end="")
 
     if scipy_ok:
         if mono and (len(signal.shape) > 1):     # convert to mono
@@ -222,7 +223,8 @@ def read_audio_file(filename, sr=44100, mono=True, norm=False, device='cpu', dty
             signal = librosa.resample(signal, rate*1.0, sr*1.0, res_type='kaiser_fast')
 
     else:                                         # try librosa; it's slower but general
-        print("Trying librosa.")
+        if warn:
+            print("Trying librosa.")
         signal, out_sr = librosa.core.load(filename, mono=mono, sr=sr, res_type='kaiser_fast')
 
     if signal.dtype != dtype:

@@ -99,7 +99,7 @@ class AudioFileDataSet(Dataset):
         assert len(self.input_filenames) == len(self.target_filenames)   # TODO: One can imagine a scheme with multiple targets per input
 
         print("  AudioFileDataSet: Check to make sure input & target filenames sorted together in the same order:")
-        for i in range(10):
+        for i in range(min(10, len(self.input_filenames))):
             print("      i =",i,", input_filename =",os.path.basename(self.input_filenames[i]),\
               ", target_filename =",os.path.basename(self.target_filenames[i]))
 

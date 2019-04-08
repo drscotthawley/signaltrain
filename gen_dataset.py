@@ -65,11 +65,12 @@ def gen_one_io_pair(name, t, x, sr, effect, settings_per, log_interval, infile_l
     if infile_list is not None:             # use pre-existing input files
         # read audio from file on the list
         infile_i =  outfile_i % len(infile_list)  # sequentially walk through and 'wrap-around' end of infile list
+        #infile_i = np.random.randint(len(infile_list))  # just grab some random file
         infilename = infile_list[infile_i]
 
         clip_len = len(x)                         # signal length is stored in x from earlier
 
-        x, sr = st.audio.read_audio_file(infilename, sr=sr, dtype=dtype) # overwrite x by reading audio
+        x, sr = st.audio.read_audio_file(infilename, sr=sr, dtype=dtype, warn=False) # overwrite x by reading audio
 
         # but only use a random subset of x, given by len(t) (which was set by --dur)
 
@@ -139,7 +140,7 @@ def gen_one_io_pair(name, t, x, sr, effect, settings_per, log_interval, infile_l
     outfilename_input = outpath + "input_"+str(out_idx)+ "_.wav"  # note the extra _ before the .wav. That ensures the input filenames sort in the same order as the targets
     outfilename_target = outpath + "target_"+str(out_idx)+"_"+effect.name + knobs_str + ".wav"
 
-    if (outfile_i % log_interval == 0):   # status message
+    if (outfile_i % log_interval == 0):   # status message every now & then. we do NOT output every file!
         if infile_list is not None:
             print("orig input file = ",infilename)
         print("outfile_i = ",outfile_i,"/",num_outfiles,", outpath = ",outpath,", outfilename_input = ",outfilename_input, ", target = ",outfilename_target,sep="")
@@ -164,15 +165,16 @@ def gen_synth_data(args):
     if 'comp_4c' == args.effect:
         effect = st.audio.Compressor_4c()
     elif 'comp' == args.effect:
-        effect = st.audio.Compressor()
+        effect = st.audio.Compressor() # 3-knob compressor
     elif 'comp_t' == args.effect:
         effect = st.audio.Comp_Just_Thresh()
-    elif 'comp_large' == args.effect:
+    elif 'comp_4c_large' == args.effect:
         effect = st.audio.Compressor_4c_Large()
     else:
         print("Sorry, not set up to work for other effects")
         sys.exit(1)
-
+    effect.info()
+    
     train_val_split = 0.8  # between 0 and 1, below number will be train, rest will be val 0.8 means 80-20 split
     if settings_per is not None:  # evenly cover knob values in Train
         num_train_files = int( settings_per**len(effect.knob_ranges) ) # Evenly spaces settings

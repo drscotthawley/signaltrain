@@ -69,6 +69,24 @@ def predict_long(signal, knobs_nn, model, chunk_size, out_chunk_size, sr=44100, 
     return  y_pred[0:-num_extra]
 
 
+def calc_ct(signal, effect, knobs_wc, out_chunk_size, chunk_size, sr=44100):
+    # calculate chunked target audio
+    lookback_size = chunk_size - out_chunk_size
+    if lookback_size >= 0:
+        padded_sig = np.concatenate((np.zeros(lookback_size, dtype=np.float32), signal))
+        y_ct = np.zeros(len(padded_sig))                      # start with y_ct all zeros
+        for i in np.arange(0, len(padded_sig), out_chunk_size):
+            iend = min( i+chunk_size, len(padded_sig))        # where's the end of this
+            in_chunk = padded_sig[i:iend]                     # grab input chunk from padded signal
+            out_chunk, _ = effect.go_wc(in_chunk, knobs_wc)   # apply effect on this chunk
+            if len(out_chunk) > out_chunk_size:               # watch out for array sizes...
+                out_chunk = out_chunk[-out_chunk_size:]
+            itbgn, itend = iend - len(out_chunk), iend
+            y_ct[itbgn:itend] = out_chunk                     # paste the result into y_ct
+        y_ct = y_ct[lookback_size:]                           # remove padding
+    return y_ct
+
+
 
 if __name__ == "__main__":
     ## Can be run as standalone app for testing / eval purposes
@@ -108,6 +126,7 @@ if __name__ == "__main__":
     # Setup model
     model = nn_proc.st_model(scale_factor=scale_factor, shrink_factor=shrink_factor, num_knobs=num_knobs, sr=sr)
     model.load_state_dict(state_dict)   # overwrite the weights using the checkpoint
+    chunk_size = model.in_chunk_size
     out_chunk_size = model.out_chunk_size
     print("out_chunk_size = ",out_chunk_size)
 
@@ -129,7 +148,9 @@ if __name__ == "__main__":
     #knobs_wc = np.array([-20, 5, .01, .04])  # 4-knob compressor settings, for Leadfoot in demo
     #knobs_wc = np.array([-40])  # comp with only 1 knob 'thresh'
     #knobs_wc = np.array([1,85])
-    knobs_wc = np.array([0,65])
+    knobs_wc = np.array([-30.0, 5.0, 0.04, 0.04])
+    #knobs_wc = np.array([0,65])
+    print("knobs_wc  =",knobs_wc)
 
     # convert to NN parameters for knobs
     kr = np.array(knob_ranges)
@@ -141,18 +162,22 @@ if __name__ == "__main__":
     if do_target:
         if args.effect == 'comp_4c':
             effect = st.audio.Compressor_4c()
-            y_target, _ = effect.go(signal, knobs_nn)
+        elif args.effect == 'comp_4c_large':
+            effect = st.audio.Compressor_4c_Large()
         elif args.effect == 'comp_t':
             effect = st.audio.Comp_Just_Thresh()
-            y_target, _ = effect.go(signal, knobs_nn)
         elif args.effect == 'files':
             print('going to try to load what we can')
             #target_file = '/home/shawley/datasets/LA2A_LC_032019/Val/target_218_LA2A_3c__1__85.wav'
             target_file = '/home/shawley/datasets/LA2A_03_Hawleybuild/Test/target_235_LA2A_2c__0__65.wav'
-            y_target, _ = st.audio.read_audio_file(target_file)
-            print("-------------------------------   len(y_target) = ",len(y_target))
+            y_st, _ = st.audio.read_audio_file(target_file)
+            print("-------------------------------   len(y_st) = ",len(y_st))
         else:
             print("WARNING: That effect not implemented yet. Skipping target generation.")
+
+        if 'comp' in args.effect:
+            y_st, _ = effect.go(signal, knobs_nn)
+            y_ct = calc_ct(signal, effect, knobs_wc, out_chunk_size, chunk_size)
 
 
     # Call the predict_long routine
@@ -162,17 +187,18 @@ if __name__ == "__main__":
     print("\n...Back. Output: y_pred.shape = ",y_pred.shape)
 
     if (do_target):
-        print("y_target.shape = ",y_target.shape)
-        print("diff in lengths = ",len(y_target)-len(y_pred))
+        print("y_st.shape = ",y_st.shape)
+        print("diff in lengths = ",len(y_st)-len(y_pred))
 
     # output files (offset pred with zeros to time-match with input & target)
-    y_out = np.zeros(len(y_target),dtype=np.float32)
+    y_out = np.zeros(len(y_st),dtype=np.float32)
     y_out[-len(y_pred):] = y_pred
 
     print("Output y_out.shape = ",y_out.shape)
     st.audio.write_audio_file("input.wav", signal, sr=44100)
     st.audio.write_audio_file("y_pred.wav", y_out, sr=44100)
     if do_target:
-        st.audio.write_audio_file("y_target.wav", y_target, sr=44100)
+        st.audio.write_audio_file("y_st.wav", y_st, sr=44100)
+        st.audio.write_audio_file("y_ct.wav", y_ct, sr=44100)
 
     print("Finished.")
