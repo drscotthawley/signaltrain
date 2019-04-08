@@ -94,7 +94,7 @@ def core_modulation(freq_subbands, window_size):
     else:
         cos_an = orig_method(freq_subbands, window_size, w)
 
-    return cos_an.astype(np.float32)
+    return cos_an.astype(np.float32, copy=False)
 
 
 class Analysis(nn.Module):

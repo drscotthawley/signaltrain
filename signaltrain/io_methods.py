@@ -267,13 +267,13 @@ class AudioIO:
 			sWidth = _wave.open(fileName).getsampwidth()
 			if sWidth == 1:
 				#print('8bit case')
-				samples = samples.astype(float) / AudioIO.normFact['int8'] - 1.0
+				samples = samples.astype(float, copy=False) / AudioIO.normFact['int8'] - 1.0
 			elif sWidth == 2:
 				#print('16bit case')
-				samples = samples.astype(float) / AudioIO.normFact['int16']
+				samples = samples.astype(float, copy=False) / AudioIO.normFact['int16']
 			elif sWidth == 3:
 				#print('24bit case')
-				samples = samples.astype(float) / AudioIO.normFact['int24']
+				samples = samples.astype(float, copy=False) / AudioIO.normFact['int24']
 		except:
 			#print('32bit case')
 			samples, sampleRate = AudioIO._loadWAVWithScipy(fileName)
