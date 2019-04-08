@@ -28,7 +28,7 @@ def get_1cycle_schedule(lr_max = 1e-3, n_data_points = 8000, epochs = 200,
           optimizer.param_groups[0]['lr'] = lrs[iter_count]
   """
   #pct_start, div_factor = 0.3, 25.        # @sgugger's parameters in fastai code
-  pct_start, div_factor = 0.3, 15.        # my modification
+  pct_start, div_factor = 0.3, 15.       # my attempt to train faster 
   lr_start = lr_max/div_factor
   lr_end = lr_start/1e4
   n_iter = n_data_points * epochs // batch_size     # number of iterations

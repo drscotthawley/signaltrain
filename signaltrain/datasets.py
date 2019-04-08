@@ -35,7 +35,7 @@ def do_augment(x,y, rand_invert=True, mult_some=False, add_some=True):
         fraction = 0.2 # mess with this fraction of number of samples in the lookback window
         n = int(lookback * fraction)                     # number of samples to modify
         indices = np.random.randint(0, high=lookback, size=n) # indices where mod will occur
-        mults = (2*np.random.rand(n)-1).astype(x.dtype)  # random multiplicative factor [-1..1]
+        mults = (2*np.random.rand(n)-1).astype(x.dtype, copy=False)  # random multiplicative factor [-1..1]
         x[indices] = x[indices] * mults
 
     if add_some and np.random.choice([True,False]):
@@ -44,7 +44,7 @@ def do_augment(x,y, rand_invert=True, mult_some=False, add_some=True):
         n = int(lookback * fraction)                     # number of samples to modify
         indices = np.random.randint(0, high=lookback, size=n)
         tiny_fac = np.max(x) / 1e6
-        adds = ( tiny_fac*(2*np.random.rand(n)-1) ).astype(x.dtype)
+        adds = ( tiny_fac*(2*np.random.rand(n)-1) ).astype(x.dtype, copy=False)
         x[indices] = x[indices] + adds
     return x, y
 
@@ -107,9 +107,13 @@ class AudioFileDataSet(Dataset):
             self.preload_audio()
 
     def preload_audio(self):
-        print("    Preloading audio files for this dataset...")  # alternative is to have workers do it at each epoch: saves memory but is slower
+        # This is much faster than reading files anew each epoch, but comes at the cost of assuming a uniform dataset.
+        # Alternative is to have workers load files at each epoch: that saves memory but is WAY slower that preloading
+        print("    Preloading audio files for this dataset. **WARNING: This assumes all files are the same duration**")
         files_to_load = min(100000, len(self.input_filenames))   # min / trap to avoid memory errors
         audio_in, audio_targ, knobs_wc = self.read_one_new_file_pair()  # read one file for sizing
+        dur = len(audio_in)/self.sr
+        print(f"        Sample audio file has {len(audio_in)} samples = {dur} seconds. Assuming all others are the same size.")
         self.num_knobs = len(knobs_wc)
         self.x = np.zeros((files_to_load,len(audio_in) ),dtype=self.dtype)
         self.y = np.zeros((files_to_load,len(audio_targ) ),dtype=self.dtype)
@@ -117,7 +121,7 @@ class AudioFileDataSet(Dataset):
         for i in range(files_to_load):
             if ((i+1) % 100 == 0) or (i+1 == files_to_load):
                 print("\r       i = ",i+1,"/",files_to_load,sep="",end="")
-            tmp_x, tmp_y, self.knobs[i] = self.read_one_new_file_pair(idx=i)
+            tmp_x, tmp_y,  self.knobs[i] = self.read_one_new_file_pair(idx=i)
             if self.effect.is_inverse:
                 tmp_x, tmp_y = tmp_y, tmp_x         # for effects that reverse 'input' and 'output' (for de-____ effects)
 
@@ -173,15 +177,18 @@ class AudioFileDataSet(Dataset):
         # parse knobs from target filename
         knobs_wc = self.parse_knob_string(self.target_filenames[idx])
 
+        ''' # only rerun effect on chunks. see get_single_chunk() below
         if self.rerun_effect: # run effect on entire file; this for checking/diagnostic only; can ignore for typical uses
             audio_orig = np.copy(audio_targ)
             audio_targ, audio_in = self.effect.go_wc(audio_in, knobs_wc)
+
             audio_diff = audio_targ - audio_orig
             if np.max(np.abs(audio_diff)) > 1e-6:  # output log files for when this makes a difference
                 audio.write_audio_file('audio_in_'+str(idx)+'.wav', audio_in, sr=44100)
                 audio.write_audio_file('audio_orig_'+str(idx)+'.wav', audio_orig, sr=44100)
                 audio.write_audio_file('audio_targ_'+str(idx)+'.wav', audio_targ, sr=44100)
                 audio.write_audio_file('audio_diff_'+str(idx)+'.wav', audio_diff, sr=44100)
+            '''
 
         return audio_in, audio_targ, knobs_wc
 
@@ -202,7 +209,6 @@ class AudioFileDataSet(Dataset):
         x_item = in_audio[ibgn:ibgn+self.chunk_size]
         y_item = targ_audio[ibgn:ibgn+self.chunk_size]
 
-        # TODO: stupid hacky hack:
         if self.rerun_effect:  # re-run the effect on this chunk , and replace target audio
             y_item, x_item = self.effect.go_wc(x_item, knobs_wc)   # Apply the audio effect
 
@@ -218,7 +224,7 @@ class AudioFileDataSet(Dataset):
         if self.augment:
             x_item, y_item = do_augment(x_item, y_item)
 
-        return x_item.astype(self.dtype), y_item.astype(self.dtype), knobs_nn.astype(self.dtype)
+        return x_item.astype(self.dtype, copy=False), y_item.astype(self.dtype, copy=False), knobs_nn.astype(self.dtype, copy=False)
 
     # required part of torch.Dataset class.  This is how DataLoader gets a new piece of data
     def __getitem__(self, idx):  # we ignore idx and grab a random bit from a random file
@@ -275,7 +281,7 @@ class SynthAudioDataSet(Dataset):
             return self.x[idx], self.y[idx], self.knobs[idx]
 
         x, y, knobs = self.gen_single_chunk()
-        return x.astype(self.dtype)[-self.chunk_size:], y[-self.y_size:], knobs.astype(self.dtype)
+        return x.astype(self.dtype, copy=False)[-self.chunk_size:], y[-self.y_size:], knobs.astype(self.dtype, copy=False)
 
     def gen_single_chunk(self, chooser=None, knobs=None):
         """

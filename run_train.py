@@ -40,6 +40,7 @@ if __name__ == "__main__":
     parser.add_argument('--scale', type=float, help='Scale factor (of input size & whole model)', default=1.0)
     parser.add_argument('--shrink', type=int, help='Shink output chunk relative to input by this divisor', default=4)
     parser.add_argument('--apex', help="optimization setting to use with NVIDIA apex", default="O0")
+    parser.add_argument('-t','--target', help="type of target: chunk or stream", default="stream")
     args = parser.parse_args()
 
     # print command line as it was invoked (for reading nohup.out later)
@@ -58,6 +59,8 @@ if __name__ == "__main__":
         effect = st.audio.Compressor()
     elif e == 'comp_t':
         effect = st.audio.Comp_Just_Thresh()
+    elif e == 'comp_large':
+        effect = st.audio.Compressor_4c_Large()
     elif e == 'denoise':
         effect = st.audio.Denoise()
     elif e == 'lowpass':
@@ -78,6 +81,9 @@ if __name__ == "__main__":
     if effect is st.audio.FileEffect:
         args.synthprob = 0.0    # can't run pre-recorded effects post-facto
 
+    if args.target not in ["chunk","stream"]:
+        print(f"Error, invalid target type: {args.target}")
+        sys.exit(1)
     # Finished parsing/checking arguments, ready to run
 
 
@@ -88,6 +94,6 @@ if __name__ == "__main__":
     # call the trianing routine
     st.train.train(epochs=args.epochs, n_data_points=args.num, batch_size=args.batch, device=device, sr=args.sr,\
         effect=effect, datapath=args.path, scale_factor=args.scale, shrink_factor=args.shrink,
-        apex_opt=args.apex)
+        apex_opt=args.apex, target_type=args.target)
 
 # EOF

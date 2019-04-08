@@ -105,7 +105,7 @@ def box(t, randfunc=np.random.rand, t0_fac=None, delta=None):
     delta = np.random.choice([0, np.random.randint(100) ]) if delta is None else delta # maybe slope the sides ; delta=0 is an immediate step response
     i_up = delta+int( 0.3*randfunc() * maxi) if t0_fac is None else int(t0_fac*maxi)
     i_dn = min( i_up + int( (0.3+0.35*randfunc())*maxi), maxi-delta-1)   # time for jumping back down
-    x = height_end*np.ones(t.shape[0]).astype(t.dtype)  # unit amplitude
+    x = height_end*np.ones(t.shape[0]).astype(t.dtype, copy=False)  # unit amplitude
     x[0:i_up-1] = height_bgn
     x[i_up:i_dn] = height_mid    # the "flat top" middle area of the box
     if delta > 0:
@@ -215,7 +215,7 @@ def read_audio_file(filename, sr=44100, mono=True, norm=False, device='cpu', dty
             signal = signal[:,0]
 
         if isinstance(signal[0], np.int16):      # convert from ints to floats if necessary
-            signal = np.array(signal, dtype=dtype)/32767.0   # change from [-32767..32767] to [-1..1]
+            signal = np.array(signal/32767.0, dtype=dtype)   # change from [-32767..32767] to [-1..1]
 
         if out_sr != int(sr):
             print(f"read_audio_file: Got sample rate of {rate} Hz instead of {sr} Hz requested. Resampling.")
@@ -225,10 +225,14 @@ def read_audio_file(filename, sr=44100, mono=True, norm=False, device='cpu', dty
         print("Trying librosa.")
         signal, out_sr = librosa.core.load(filename, mono=mono, sr=sr, res_type='kaiser_fast')
 
-    if norm:
-        signal = signal/np.max(np.abs(signal))
+    if signal.dtype != dtype:
+        signal = signal.astype(dtype, copy=False)
 
-    return signal.astype(dtype), out_sr
+    if norm:
+        absmax = np.max(np.abs(signal))
+        signal = signal/absmax if absmax > 0 else signal
+
+    return signal, out_sr
 
 
 def write_audio_file(filename, data, sr=44100):
@@ -326,13 +330,13 @@ def compressor(x, thresh=-24, ratio=2, attackrel=0.045, sr=44100.0, dtype=np.flo
     b, a = scipy_signal.butter(1, fc, analog=False, output='ba')
     zi = scipy_signal.lfilter_zi(b, a)
 
-    dB = 20. * np.log10(np.abs(x) + 1e-6).astype(dtype)
+    dB = 20. * np.log10(np.abs(x) + 1e-6)
     in_env, _ = scipy_signal.lfilter(b, a, dB, zi=zi*dB[0])  # input envelope calculation
     out_env = np.copy(in_env)              # output envelope
     i = np.where(in_env >  thresh)          # compress where input env exceeds thresh
     out_env[i] = thresh + (in_env[i]-thresh)/ratio
     gain = np.power(10.0,(out_env-in_env)/20)
-    y = (x * gain).astype(dtype)
+    y = x * gain
     return y
 
 @jit(nopython=True)
@@ -343,10 +347,10 @@ def my_clip_min(x, clip_min):  # does the work of np.clip(), which numba doesn't
     return x
 
 @jit(nopython=True)
-def compressor_4controls(x, thresh=-24.0, ratio=2.0, attackTime=0.01, releaseTime=0.01, sr=44100.0, dtype=np.float32):
+def compressor_4controls(x, thresh=-24.0, ratio=2.0, attackTime=0.01, releaseTime=0.01, sr=44100.0):
     """
-    Thanks to Eric Tarr for MATLAB code for this, p. 428 of Hack Audio book.
-    SHH mods for Python:
+    Thanks to Eric Tarr for MATLAB code for this, p. 428 of his Hack Audio book.  Used with permission.
+    Our mods for Python:
         Minimized the for loop, removed dummy variables, and invoked numba @jit to make this "fast"
     Inputs:
       x: input signal
@@ -354,46 +358,48 @@ def compressor_4controls(x, thresh=-24.0, ratio=2.0, attackTime=0.01, releaseTim
       thresh: threhold in dB
       ratio: ratio (should be >=1 , i.e. ratio:1)
       attackTime, releaseTime: in seconds
-      dtype: typical numpy datatype
     """
     N = len(x)
+    dtype = x.dtype
     y = np.zeros(N, dtype=dtype)
     lin_A = np.zeros(N, dtype=dtype)  # functions as gain
 
     # Initialize separate attack and release times
-    alphaA = np.exp(-np.log(9)/(sr * attackTime))#.astype(dtype)
-    alphaR = np.exp(-np.log(9)/(sr * releaseTime))#.astype(dtype)
+    alphaA = np.exp(-np.log(9)/(sr * attackTime))#.astype(dtype,copy=False)  numba doesn't support astype
+    alphaR = np.exp(-np.log(9)/(sr * releaseTime))#.astype(dtype,copy=False)
 
     # Turn the input signal into a uni-polar signal on the dB scale
-    x_uni = np.abs(x).astype(dtype)
-    x_dB = 20*np.log10(x_uni + 1e-8).astype(dtype)
+    x_uni = np.abs(x)
+    x_dB = 20*np.log10(x_uni + 1e-8)  # x_uni casts type
 
     # Ensure there are no values of negative infinity
     #x_dB = np.clip(x_dB, -96, None)   # Numba doesn't yet support np.clip but we can write our own
     x_dB = my_clip_min(x_dB, -96)
 
     # Static Characteristics
-    gainChange_dB = np.zeros(x_dB.shape[0])
+    gainChange_dB = np.zeros(x_dB.shape[0], dtype=dtype)
     i = np.where(x_dB > thresh)
     gainChange_dB[i] =  thresh + (x_dB[i] - thresh)/ratio - x_dB[i] # Perform Downwards Compression
 
-    for n in range(x_dB.shape[0]):   # this loop is slow but unavoidable if alphaA != alphaR. @autojit makes it fast(er).
+    for n in range(1, N):  # this loop is slow but not vectorizable due to its cumulative, sequential nature. @autojit makes it fast(er).
         # smooth over the gainChange
         if gainChange_dB[n] < lin_A[n-1]:
             lin_A[n] = ((1-alphaA)*gainChange_dB[n]) +(alphaA*lin_A[n-1]) # attack mode
         else:
             lin_A[n] = ((1-alphaR)*gainChange_dB[n]) +(alphaR*lin_A[n-1]) # release
 
-    lin_A = np.power(10.0,(lin_A/20)).astype(dtype)  # Convert to linear amplitude scalar; i.e. map from dB to amplitude
+    lin_A = np.power(10.0,(lin_A/20))  # Convert to linear amplitude scalar; i.e. map from dB to amplitude
+
     y = lin_A * x    # Apply linear amplitude to input sample
 
-    return y.astype(dtype)
+    return y
 
 
  # this is a echo or delay function
-def echo(x, delay_samples=1487, ratio=0.6, echoes=1, dtype=np.float32):
+def echo(x, delay_samples=1487, ratio=0.6, echoes=1):
     # ratio = redution ratio
-    y = np.copy(x).astype(dtype)
+    dtype = x.dtype
+    y = np.copy(x)
     for i in range(int(np.round(echoes))):   # note 'echoes' is a 'switch'; does not vary continuously
         ip1 = i+1       # literally "i plus 1"
         delay_length = ip1 * delay_samples
@@ -418,9 +424,8 @@ class Effect():
     def __init__(self, sr=44100.0, dtype=np.float32):
         self.name = 'Generic Effect'
         self.knob_names = ['knob']
-        self.knob_ranges = np.array([[0,1]]).astype(dtype)  # min,max world coordinate values for "all the way counterclockwise" and "all the way clockwise"
+        self.knob_ranges = np.array([[0,1]], dtype=dtype)  # min,max world coordinate values for "all the way counterclockwise" and "all the way clockwise"
         self.sr = sr
-        self.dtype=dtype
         self.is_inverse = False  # Does this effect perform an 'inverse problem' by reversing x & y at the end?
 
     def knobs_wc(self, knobs_nn):   # convert knob vals from [-.5,.5] to "world coordinates" used by effect functions
@@ -464,6 +469,16 @@ class Compressor_4c(Effect):  # compressor with 4 controls
         return compressor_4controls(x, thresh=knobs_w[0], ratio=knobs_w[1], attackTime=knobs_w[2], releaseTime=knobs_w[3], sr=self.sr), x
 
 
+class Compressor_4c_Large(Effect):  # compressor with 4 controls, larger ranges for parameters
+    def __init__(self, **kwargs):
+        super(Compressor_4c_Large, self, **kwargs).__init__()
+        self.name = 'Compressor_4c_Large'
+        self.knob_names = ['threshold', 'ratio', 'attackTime','releaseTime']
+        self.knob_ranges = np.array([[-50,0], [1.5,10], [1e-3,1], [1e-3,1]])
+    def go_wc(self, x, knobs_w):
+        return compressor_4controls(x, thresh=knobs_w[0], ratio=knobs_w[1], attackTime=knobs_w[2], releaseTime=knobs_w[3], sr=self.sr), x
+
+
 class Comp_Just_Thresh(Effect):  # compressor with just threshold
     """
     Purpose of this effect: used for comparison vs (analog) LA2A
@@ -472,7 +487,7 @@ class Comp_Just_Thresh(Effect):  # compressor with just threshold
         super(Comp_Just_Thresh, self, **kwargs).__init__()
         self.name = 'Comp_Just_Thresh'
         self.knob_names = ['threshold']
-        self.knob_ranges = np.array([[-30,0]])
+        self.knob_ranges = np.array([[-50,-10]])
         self.ratio = 3.0
         self.attack = .05 # 50ms
         self.release = 1.0 # 1 second!
@@ -513,7 +528,7 @@ class Denoise(Effect):  # add noise to x, swap x and y
         self.knob_ranges = np.array([[0.0,0.5]])
         self.is_inverse = True
     def go_wc(self, x, knobs_w):
-        return x, x + (knobs_w[0]*(2*np.random.random(x.shape[0])-1)).astype(x.dtype)   # swaps y & x: what was the input becomes the output
+        return x, x + (knobs_w[0]*(2*np.random.random(x.shape[0])-1)).astype(x.dtype, copy=False)   # swaps y & x: what was the input becomes the output
 
 class DeCompressor_4c(Effect):  # compressor with 4 controls
     def __init__(self):
@@ -592,7 +607,7 @@ class FileEffect(Effect):
     '''
     def __init__(self, path, sr=44100, ):
         super(FileEffect, self).__init__()
-
+        print("  FileEffect: path = ",path)
         if (path is None) or (not glob.glob(path+"/Train/target*")) \
             or (not glob.glob(path+"/Val/target*")) or ((not glob.glob(path+"/effect_info.ini"))):
             print(f"Error: can't file target output files or effect_info.ini in path = {path}")

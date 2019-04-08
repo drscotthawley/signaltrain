@@ -13,6 +13,17 @@ import sys
 sys.path.append('..')
 import signaltrain as st
 
+# NVIDIA Apex for mixed-precision training
+have_apex = False
+try:
+    from apex.parallel import DistributedDataParallel as DDP
+    from apex.fp16_utils import *
+    from apex import amp, optimizers
+    from apex.multi_tensor_apply import multi_tensor_applier
+    have_apex = True
+except ImportError:
+    print("Recommend that you install apex from https://www.github.com/nvidia/apex to run this code.")
+
 
 def predict_long(signal, knobs_nn, model, chunk_size, out_chunk_size, sr=44100, effect=None, device="cpu:0"):
 
@@ -21,20 +32,35 @@ def predict_long(signal, knobs_nn, model, chunk_size, out_chunk_size, sr=44100, 
     print("predict_long: chunk_size, out_chunk_size, overlap = ",chunk_size, out_chunk_size, overlap)
     x = st.audio.sliding_window(signal, chunk_size, overlap=overlap)
     print("predict_long: x.shape, signal.shape = ",x.shape, signal.shape )
+    batch_size = x.shape[0]
+    if x.shape[0] > 200:
+        print(f"**WARNING: effective batch size = {x.shape[0]}, may be too large and produce CUDA out of memory errors")
+        batch_size = 200
 
-    knobs = np.tile(knobs_nn, (x.shape[0],1))     # repeat knob settings a bunch of times
+    knobs = np.tile(knobs_nn, (batch_size,1))     # repeat knob settings a bunch of times
+    knobs_torch = torch.Tensor(knobs.astype(np.float32, copy=False)).to(device)
 
-    # Move data to torch device
-    x_torch = torch.Tensor(x.astype(np.float32)).to(device)
-    knobs_torch = torch.Tensor(knobs.astype(np.float32)).to(device)
-    #print("x_torch.size() =",x_torch.size(), ", knobs_torch.size() =",knobs_torch.size() )
+    y_pred = np.empty( shape=(0) )
+    # move through the audio file, one batch at a time
+    bmax = int(np.round(x.shape[0]/batch_size))
+    print("bmax = ",bmax)
+    for b in range(bmax):
+        print('batch id b =',b,end="")
+        bstart = b*batch_size
+        if b == bmax-1:   # last batch
+            batch_size = x.shape[0] - bstart
+        print(', bstart = ',bstart,', batch_size = ',batch_size)
+        # Move data to torch device
+        knobs = np.tile(knobs_nn, (batch_size,1))     # repeat knob settings a bunch of times
+        knobs_torch = torch.Tensor(knobs.astype(np.float32, copy=False)).to(device)
+        x_torch = torch.Tensor(x[bstart:bstart+batch_size].astype(np.float32, copy=False)).to(device)
 
-    # Do the model prediction
-    y_hat, mag, mag_hat = model.forward(x_torch, knobs_torch)
+        # Do the model prediction
+        y_hat, mag, mag_hat = model.forward(x_torch, knobs_torch)
 
-    # Reassemble the output into one long signal
-    # Note: we don't need (or want) to undo_sliding_window() because y_hat has no overlaps
-    y_pred = y_hat.cpu().detach().numpy().flatten().astype(np.float32)
+        # Reassemble the output into one long signal
+        # Note: we don't need (or want) to undo_sliding_window() because y_hat has no overlaps
+        y_pred = np.append( y_pred, y_hat.squeeze(0).cpu().detach().numpy().flatten().astype(np.float32,copy=False) )
 
     # note that sliding_window() probably tacked zeros onto the end, so let's remember to take them off
     unique = x.shape[1] + (x.shape[0]-1)*(x.shape[1]-overlap) # number of unique values in windowed x (including extra zeros but not overlaps)
@@ -65,7 +91,7 @@ if __name__ == "__main__":
     parser.add_argument('audiofile', help='Name of audio file to read')
     parser.add_argument('--effect', help='Name of effect class for generating target', default='comp_4c')
     args = parser.parse_args()
-
+    print("args =",args)
 
     # load from checkpoint
     print("Looking for checkpoint at",args.checkpoint)
@@ -85,6 +111,12 @@ if __name__ == "__main__":
     out_chunk_size = model.out_chunk_size
     print("out_chunk_size = ",out_chunk_size)
 
+
+    if have_apex:
+        optimizer = torch.optim.Adam(list(model.parameters()))
+        model, optimizer = amp.initialize(model, optimizer, opt_level="O2")
+
+
     # Input Data
     #infile="/home/shawley/datasets/signaltrain/music/Test/WindyPlaces.ITB.Mix10-2488-1644.wav"
     infile = args.audiofile
@@ -92,30 +124,46 @@ if __name__ == "__main__":
     signal, sr = st.audio.read_audio_file(infile, sr=sr)
     print("signal.shape = ",signal.shape)
 
-    # Choose knob settings
-    #knobs_wc = np.array([0, 20.0, 95.0])  # one set of settings Ben used
-    #kr = np.array([[0,1], [0,100], [0,100]] )  # knob ranges for ben's LA2A compressor
-    knobs_wc = np.array([-30, 2.5, .002, .03])  # 4-knob compressor settings
+    ##### KNOB SETTINGS HERE
+    #knobs_wc = np.array([-30, 2.5, .002, .03])  # 4-knob compressor settings, for Windy Places in demo
+    #knobs_wc = np.array([-20, 5, .01, .04])  # 4-knob compressor settings, for Leadfoot in demo
+    #knobs_wc = np.array([-40])  # comp with only 1 knob 'thresh'
+    #knobs_wc = np.array([1,85])
+    knobs_wc = np.array([0,65])
 
     # convert to NN parameters for knobs
     kr = np.array(knob_ranges)
     knobs_nn = (knobs_wc - kr[:,0])/(kr[:,1]-kr[:,0]) - 0.5
 
     # Generate Target audio  - in one big stream: "streamed target" data
+    print("\nhello. args.effect=",args.effect)
     do_target = (args.effect != '')
-    if do_target and (args.effect == 'comp_4c'):
-        effect = st.audio.Compressor_4c()  # TODO: this should not be hard-coded
-        y_target, _ = effect.go(signal, knobs_nn)
-    else:
-        print("Warning: only comp_4c effect is implemented now. Skipping target generation.")
+    if do_target:
+        if args.effect == 'comp_4c':
+            effect = st.audio.Compressor_4c()
+            y_target, _ = effect.go(signal, knobs_nn)
+        elif args.effect == 'comp_t':
+            effect = st.audio.Comp_Just_Thresh()
+            y_target, _ = effect.go(signal, knobs_nn)
+        elif args.effect == 'files':
+            print('going to try to load what we can')
+            #target_file = '/home/shawley/datasets/LA2A_LC_032019/Val/target_218_LA2A_3c__1__85.wav'
+            target_file = '/home/shawley/datasets/LA2A_03_Hawleybuild/Test/target_235_LA2A_2c__0__65.wav'
+            y_target, _ = st.audio.read_audio_file(target_file)
+            print("-------------------------------   len(y_target) = ",len(y_target))
+        else:
+            print("WARNING: That effect not implemented yet. Skipping target generation.")
 
 
     # Call the predict_long routine
     print("\nCalling predict_long()...")
     y_pred = predict_long(signal, knobs_nn, model, chunk_size, out_chunk_size, sr=sr, device=device)
 
-    print("\n...Back. Output: y_pred.shape = ",y_pred.shape, "y_target.shape = ",y_target.shape)
-    print("diff in lengths = ",len(y_target)-len(y_pred))
+    print("\n...Back. Output: y_pred.shape = ",y_pred.shape)
+
+    if (do_target):
+        print("y_target.shape = ",y_target.shape)
+        print("diff in lengths = ",len(y_target)-len(y_pred))
 
     # output files (offset pred with zeros to time-match with input & target)
     y_out = np.zeros(len(y_target),dtype=np.float32)

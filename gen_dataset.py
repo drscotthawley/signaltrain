@@ -112,15 +112,15 @@ def gen_one_io_pair(name, t, x, sr, effect, settings_per, log_interval, infile_l
         else:
             outpath += 'Train/'
 
-    # generate knob setting(s) -- one setting for the whole signal.
+    # generate knob setting(s) -- one setting for the whole signal "streamed target"
     nk = len(effect.knob_ranges)   # numknobs
-    if ("Train" not in outpath) or (settings_per is None) or (outfile_i >= settings_per**nk):
+    if (('Train' not in outpath) and ('Val' not in outpath)) or (settings_per is None) or (outfile_i >= settings_per**nk):
         # Then randomly choose knob settings
         knobs_nn = np.random.rand(nk)-0.5  # uniform distribution of knob values
         knobs_wc = effect.knobs_wc(knobs_nn)           # 'physical' knob values in "world coordinates" of the effect
     else:                                           # sequentially choose knob settings
         knobs_wc = st.audio.int2knobs(outfile_i, effect.knob_ranges, settings_per)
-    #print("file ",outfile_i,", knobs_wc = ",knobs_wc)
+        #print(f"file #{outfile_i}, settings_per = {settings_per}, knobs_wc = {knobs_wc}")
 
     # We need to enforce a certain number of significant digits to ensure reproducability (after we read the files back in)
     # The easiest way to do this is to print to string, and then convert back to values
@@ -144,8 +144,8 @@ def gen_one_io_pair(name, t, x, sr, effect, settings_per, log_interval, infile_l
             print("orig input file = ",infilename)
         print("outfile_i = ",outfile_i,"/",num_outfiles,", outpath = ",outpath,", outfilename_input = ",outfilename_input, ", target = ",outfilename_target,sep="")
 
-    st.audio.write_audio_file(outfilename_input, x.astype(dtype), sr)
-    st.audio.write_audio_file(outfilename_target, y.astype(dtype), sr)
+    st.audio.write_audio_file(outfilename_input, x.astype(dtype, copy=False), sr)
+    st.audio.write_audio_file(outfilename_target, y.astype(dtype, copy=False), sr)
 
     return
 
@@ -167,6 +167,8 @@ def gen_synth_data(args):
         effect = st.audio.Compressor()
     elif 'comp_t' == args.effect:
         effect = st.audio.Comp_Just_Thresh()
+    elif 'comp_large' == args.effect:
+        effect = st.audio.Compressor_4c_Large()
     else:
         print("Sorry, not set up to work for other effects")
         sys.exit(1)
@@ -174,8 +176,11 @@ def gen_synth_data(args):
     train_val_split = 0.8  # between 0 and 1, below number will be train, rest will be val 0.8 means 80-20 split
     if settings_per is not None:  # evenly cover knob values in Train
         num_train_files = int( settings_per**len(effect.knob_ranges) ) # Evenly spaces settings
-        num_outfiles = int(num_train_files / train_val_split)
-        print("Evenly spacing",settings_per,"settings across",len(effect.knob_ranges),end="")
+        if (inpath is None) or (('Train' not in inpath) and ('Val' not in inpath)):
+            num_outfiles = int(num_train_files / train_val_split)
+        else:
+            num_outfiles = num_train_files
+        print("Evenly spacing",settings_per,"settings across",len(effect.knob_ranges)," knob(s)",end="")
         print(", for",num_train_files,"files in Train and",num_outfiles,"total files")
 
     # Make sure name, Test & Val directories exist

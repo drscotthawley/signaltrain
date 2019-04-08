@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 __author__ = 'S.I. Mimilakis & S.H. Hawley'
-__copyright__ = 'MacSeNet'
 
 # imports
 import torch
@@ -26,8 +25,10 @@ def mae(x, x_hat):
 # Main loss function
 def calc_loss(y_hat, y_cuda, mag_hat, batch_size=20, scale_by_freq=None):
     # Reconstruction term plus regularization -> Slightly less wiggly waveform
+
     #loss = logcosh(y_hat, y_cuda) + 1e-5*torch.abs(mag_hat).mean()
     # loss = logcosh(y_hat, y_cuda) + 2e-5*torch.abs(mag_hat).mean()
+    #print("y_hat.dtype, y_cuda.dtype, mag_hat.dtype, scale_by_freq.dtype =",y_hat.dtype, y_cuda.dtype, mag_hat.dtype, scale_by_freq.dtype)
     if scale_by_freq is None:
         loss = logcosh(y_hat, y_cuda) + 2e-5*torch.abs(mag_hat).mean()    # second term is an L1 regularization to help 'damp' high-freq noise
     else:

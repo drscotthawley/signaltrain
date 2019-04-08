@@ -37,8 +37,8 @@ class Analysis(nn.Module):
         f_matrix = np.fft.fft(np.eye(self.sz), norm='ortho')
         w = sig.hamming(self.sz)
 
-        f_matrix_real = (np.real(f_matrix) * w).astype(np.float32)
-        f_matrix_imag = (np.imag(f_matrix) * w).astype(np.float32)
+        f_matrix_real = (np.real(f_matrix) * w).astype(np.float32, copy=False)
+        f_matrix_imag = (np.imag(f_matrix) * w).astype(np.float32, copy=False)
 
         if torch.has_cudnn:
             self.conv_analysis_real.weight.data.copy_(torch.from_numpy(f_matrix_real[:, None, :]).cuda())
@@ -88,8 +88,8 @@ class Synthesis(nn.Module):
         f_matrix = np.fft.fft(np.eye(self.sz), norm='ortho')
         w = Synthesis.GLA(self.sz, self.hop, self.sz)
 
-        f_matrix_real = (np.real(f_matrix) * w).astype(np.float32)
-        f_matrix_imag = (np.imag(f_matrix) * w).astype(np.float32)
+        f_matrix_real = (np.real(f_matrix) * w).astype(np.float32, copy=False)
+        f_matrix_imag = (np.imag(f_matrix) * w).astype(np.float32, copy=False)
 
         if torch.has_cudnn:
             self.conv_synthesis_real.weight.data.copy_(torch.from_numpy(f_matrix_real[:, None, :]).cuda())
@@ -188,8 +188,8 @@ class FNNAnalysis(nn.Module):
     def initialize(self):
         f_matrix = np.fft.fft(np.eye(self.sz), norm='ortho')
 
-        f_matrix_real = (np.real(f_matrix)).astype(np.float32)
-        f_matrix_imag = (np.imag(f_matrix)).astype(np.float32)
+        f_matrix_real = (np.real(f_matrix)).astype(np.float32, copy=False)
+        f_matrix_imag = (np.imag(f_matrix)).astype(np.float32, copy=False)
 
         if torch.has_cudnn:
             self.fnn_analysis_real.weight.data.copy_(torch.from_numpy(f_matrix_real).cuda())
@@ -238,8 +238,8 @@ class FNNSynthesis(nn.Module):
         print('Initializing with Fourier bases')
         f_matrix = np.fft.fft(np.eye(self.sz), norm='ortho')
 
-        f_matrix_real = (np.real(f_matrix)).astype(np.float32)
-        f_matrix_imag = (np.imag(f_matrix)).astype(np.float32)
+        f_matrix_real = (np.real(f_matrix)).astype(np.float32, copy=False)
+        f_matrix_imag = (np.imag(f_matrix)).astype(np.float32, copy=False)
 
         if torch.has_cudnn:
             self.fnn_synthesis_real.weight.data.copy_(torch.from_numpy(f_matrix_real.T).cuda())
