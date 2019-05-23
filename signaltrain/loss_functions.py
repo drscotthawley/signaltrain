@@ -23,16 +23,17 @@ def mae(x, x_hat):
 
 
 # Main loss function
-def calc_loss(y_hat, y_cuda, mag_hat, batch_size=20, scale_by_freq=None):
+def calc_loss(y_hat, y_cuda, mag_hat, batch_size=20, scale_by_freq=None, l1_lambda=2e-5):
     # Reconstruction term plus regularization -> Slightly less wiggly waveform
 
     #loss = logcosh(y_hat, y_cuda) + 1e-5*torch.abs(mag_hat).mean()
     # loss = logcosh(y_hat, y_cuda) + 2e-5*torch.abs(mag_hat).mean()
     #print("y_hat.dtype, y_cuda.dtype, mag_hat.dtype, scale_by_freq.dtype =",y_hat.dtype, y_cuda.dtype, mag_hat.dtype, scale_by_freq.dtype)
+
     if scale_by_freq is None:
-        loss = logcosh(y_hat, y_cuda) + 2e-5*torch.abs(mag_hat).mean()    # second term is an L1 regularization to help 'damp' high-freq noise
+        loss = logcosh(y_hat, y_cuda) + l1_lambda*torch.abs(mag_hat).mean()    # second term is an L1 regularization to help 'damp' high-freq noise
     else:
-        loss = logcosh(y_hat, y_cuda) + 2e-6*torch.abs(mag_hat*scale_by_freq).mean()    # second term is an L1 regularization to help 'damp' high-freq noise
+        loss = logcosh(y_hat, y_cuda) + l1_lambda/10*torch.abs(mag_hat*scale_by_freq).mean()    # second term is an L1 regularization to help 'damp' high-freq noise
 
     return loss
 
