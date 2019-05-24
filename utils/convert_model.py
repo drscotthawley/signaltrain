@@ -1,5 +1,9 @@
 #! /usr/bin/env python3
 """
+NOTE: unused/does not work!
+The hope was that ONNX would make this possible, but signaltrain uses so many 'special' functions
+not supported in ONNX that this code was abandoned.
+
 Convert a checkpoint file to another file, e.g. one for deployment only (no optimizer info)
 
 Intended as a general utility that might one day convert to ONNX or Tensorflow
