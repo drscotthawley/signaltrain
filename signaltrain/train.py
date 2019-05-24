@@ -25,9 +25,9 @@ except ImportError:
 
 
 
-def eval_status_save(model, effect, epoch, epochs, lr, device, dataloader_val, logfilename, first_time,
+def eval_status_save(model, effect, epoch, epochs, lr, mom, device, dataloader_val, logfilename, first_time,
     beta, vl_avg, checkpointname, parallel, optimizer, data_point, smoothed_loss, y_size, sr, status_every,
-    plot_every=10, cp_every=25):
+    plot_every=10, cp_every=25, scale_by_freq=None):
     """
     Status messages and run-time diagnostics.
     Check Validation set, write files & give garious messages about how we're doing
@@ -43,15 +43,21 @@ def eval_status_save(model, effect, epoch, epochs, lr, device, dataloader_val, l
         x_val_cuda, y_val_cuda, knobs_val_cuda = x_val.to(device), y_val.to(device), knobs_val.to(device)
 
         y_val_hat, mag_val, mag_val_hat = model.forward(x_val_cuda, knobs_val_cuda)
-        loss_val = loss_functions.calc_loss(y_val_hat.float(), y_val_cuda, mag_val_hat.float())
+        loss_val = loss_functions.calc_loss(y_val_hat.float(), y_val_cuda.float(), mag_val_hat.float(),
+            scale_by_freq=scale_by_freq.float())#, l1_lambda=lr/1000 )
         vl_avg = beta*vl_avg + (1-beta)*loss_val.item()    # (running) average val loss
         if 0 == val_batch_num % status_every:
             timediff = time.time() - first_time
-            print(f"\repoch {epoch+1}/{epochs}, time: {timediff:.2f}: lr = {lr:.2e}, data_point {data_point}: loss: {smoothed_loss:.3e} val_loss: {vl_avg:.3e}   ",end="")
+            print(f"\repoch {epoch+1}/{epochs}, time: {timediff:.2f}: lr={lr:.2e},mom={mom:.3f} data_point {data_point}: loss: {smoothed_loss:.3e} val_loss: {vl_avg:.3e}   ",end="")
 
     #  Write various forms of status output...
     with open(logfilename, "a") as myfile:  # save progress of val loss to text file
         myfile.write(f"{epoch+1} {vl_avg:.3e}\n")
+
+    with open("val_err_mae.dat", "a") as myfile:  # different diagnostic: exclude L1 regularization and just give MAE
+        val_mae = loss_functions.mae(y_val_hat.float(), y_val_cuda.float()).item()
+        myfile.write(f"{epoch+1} {val_mae:.3e}\n")
+
 
     if (epoch+1) % plot_every == 0:  # plot sample val data
         print("\nSaving sample data plots",end="")
@@ -61,7 +67,7 @@ def eval_status_save(model, effect, epoch, epochs, lr, device, dataloader_val, l
         io_methods.plot_spectrograms(model, mag_val, mag_val_hat)
 
     # save checkpoint of model to file, which can be loaded later
-    if ((epoch+1) % cp_every == 0):
+    if ((epoch+1) % cp_every == 0) or (epoch==epochs-1):
         misc.save_checkpoint(checkpointname, model, epoch, parallel, optimizer, effect, sr)
 
     # time estimate (got tired of calcuting this by hand every time!)
@@ -75,9 +81,9 @@ def eval_status_save(model, effect, epoch, epochs, lr, device, dataloader_val, l
 
 
 
-def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched,
+def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, mom_sched,
     dataloader, dataloader_val, y_size, parallel, logfilename, checkpointname,
-    plot_every=10, cp_every=25, sr=44100):
+    plot_every=10, cp_every=25, sr=44100, lr_max=1e-4):
     """
     The actual training loop called by train() below, after setup has occurred
         See train() below for variable meanings -- this all used to be in there.
@@ -100,6 +106,7 @@ def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched,
             x_cuda, y_cuda, knobs_cuda = x.to(device), y.to(device), knobs.to(device)
 
             lr = lr_sched[min(iter_count, len(lr_sched)-1)]  # get value for learning rate
+            mom = mom_sched[min(iter_count, len(mom_sched)-1)]
             data_point += batch_size
 
             y_hat, mag, mag_hat = model.forward(x_cuda, knobs_cuda) # feed-forward synthesis
@@ -110,7 +117,8 @@ def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched,
                 scale_by_freq = torch.exp(expfac* torch.arange(0., mag_hat.size()[-1])).expand_as(mag_hat)
 
             # loss evaluation
-            loss = loss_functions.calc_loss(y_hat.float(), y_cuda.float(), mag_hat.float(), scale_by_freq=scale_by_freq.float())
+            loss = loss_functions.calc_loss(y_hat.float(), y_cuda.float(),
+                mag_hat.float(), scale_by_freq=scale_by_freq.float())#, l1_lambda=lr/1000)
 
             # Status message
             batch_num += 1
@@ -118,7 +126,7 @@ def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched,
                 avg_loss = beta * avg_loss + (1-beta) * loss.item()
                 smoothed_loss = avg_loss / (1 - beta**batch_num)
                 timediff = time.time() - first_time
-                print(f"\repoch {epoch+1}/{epochs}, time: {timediff:.2f}: lr = {lr:.2e}, data_point {data_point}: loss: {smoothed_loss:.3e}   ",end="")
+                print(f"\repoch {epoch+1}/{epochs}, time: {timediff:.2f}: lr={lr:.2e},mom={mom:.3f}, data_point {data_point}: loss: {smoothed_loss:.3e}   ",end="")
 
             # Optimization
             optimizer.zero_grad()
@@ -140,13 +148,15 @@ def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched,
 
             # Apply Learning rate scheduling
             optimizer.param_groups[0]['lr'] = lr     # adjust according to schedule
+            optimizer.param_groups[0]['momentum'] = mom
             iter_count += 1
 
         # Epoch finished
 
-        vl_avg = eval_status_save(model, effect, epoch, epochs, lr, device, dataloader_val,
+        vl_avg = eval_status_save(model, effect, epoch, epochs, lr, mom, device, dataloader_val,
             logfilename, first_time, beta, vl_avg,
-            checkpointname, parallel, optimizer, data_point, smoothed_loss, y_size, sr, status_every)
+            checkpointname, parallel, optimizer, data_point, smoothed_loss, y_size, sr,
+            status_every, scale_by_freq=scale_by_freq)
 
     # end of loop over all epochs
 
@@ -156,7 +166,7 @@ def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched,
 
 def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_size=20,
     device=torch.device("cuda:0"), plot_every=10, cp_every=25, sr=44100, datapath=None,
-    scale_factor=1, shrink_factor=4, apex_opt="O0", target_type="stream"):
+    scale_factor=1, shrink_factor=4, apex_opt="O0", target_type="stream", lr_max=1e-4):
     """
     Main training routine for signaltrain
 
@@ -173,6 +183,7 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
         apex_opt:         option for apex multi-precision training. default is "O0" which means none
                           For Turing cards (e.g. RTX 2080 Ti), set this to "O2"
         target_type:      "chunk" (re-run the effect for each chunk) or "stream" (apply effect to whole audio stream)
+        lr_max:           maximum learning rate
     """
 
     # print info about this training run
@@ -189,11 +200,12 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
     chunk_size, out_chunk_size = model.in_chunk_size, model.out_chunk_size
     y_size = out_chunk_size
     print("Model defined.  Number of trainable parameters:",sum(p.numel() for p in model.parameters() if p.requires_grad))
+    print("      model.in_chunk_size, model.out_chunk_size = ",model.in_chunk_size, model.out_chunk_size)
     model.to(device)
 
     # Specify learning rate schedule...although we don't bother stepping the momentum
-    lr_max = 1.0e-4                         # obtained after running helpers.learningrate.lr_finder.py
-    lr_sched = learningrate.get_1cycle_schedule(lr_max=lr_max, n_data_points=n_data_points, epochs=epochs, batch_size=batch_size)
+    # Note: lr_max should be obtained by running lr_finder in learningrate.py
+    lr_sched, mom_sched = learningrate.get_1cycle_schedule(lr_max=lr_max, n_data_points=n_data_points, epochs=epochs, batch_size=batch_size)
     maxiter = len(lr_sched)
 
     synth_data = datapath is None # Are we synthesizing data or do we expect it to come from files
@@ -204,7 +216,8 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
         dataset_val = datasets.SynthAudioDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4, recycle=True, y_size=out_chunk_size, augment=False)
     else:           # use prerecoded files for input & target data
         dataset = datasets.AudioFileDataSet(chunk_size, effect, sr=sr,  datapoints=n_data_points, path=datapath+"/Train/",  y_size=out_chunk_size, rerun=(target_type!="stream"), augment=True, preload=True)
-        dataset_val = datasets.AudioFileDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4, path=datapath+"/Val/", y_size=out_chunk_size, rerun=(target_type!="stream"), augment=False)
+        #dataset_val = datasets.AudioFileDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4, path=datapath+"/Val/", y_size=out_chunk_size, rerun=(target_type!="stream"), augment=False)
+        dataset_val = datasets.AudioFileDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4,  y_size=out_chunk_size, augment=False, view_of=dataset)
 
     dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=10, shuffle=True, worker_init_fn=datasets.worker_init) # need worker_init for more variance
     dataloader_val = DataLoader(dataset_val, batch_size=batch_size, num_workers=10, shuffle=False)
@@ -236,26 +249,17 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
 
     # Setup log file
     logfilename = "vl_avg_out.dat"   # Val Loss, average, output
-    with open(logfilename, "w") as myfile:  # save progress of val loss
+    with open(logfilename, "a") as myfile:  # save progress of val loss, append
         myfile.close()
 
     # Now that everything's set up, call the training loop
-    train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, dataloader, dataloader_val, y_size, parallel, logfilename, checkpointname)
+    train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, mom_sched, dataloader, dataloader_val,
+        y_size, parallel, logfilename, checkpointname, sr=sr, lr_max=lr_max)
 
     return None
-    
+
 
 # Minimal debugging execution below; This is not really intended to be run all by itself; use ../run_train.py
 if __name__ == "__main__":
-    np.random.seed(218)
-    torch.manual_seed(218)
-    if torch.cuda.is_available():
-        device = torch.device("cuda:0")
-        torch.cuda.manual_seed(218)
-        torch.set_default_tensor_type('torch.cuda.FloatTensor')
-    else:
-        device = torch.device("cpu")
-        torch.set_default_tensor_type('torch.FloatTensor')
-    train(epochs=1000, n_data_points=200000, batch_size=200, device=device, effect=audio.Compressor_4c())
-
+    print("train.py:  Executing this file is now obsolete.  Use ../run_train.py")
 # EOF

@@ -31,15 +31,16 @@ if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Trains neural network to reproduce input-output transformations.",\
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--apex', help="optimization setting to use with NVIDIA apex", default="O0")
     parser.add_argument('-b', '--batch', type=int, help="batch size", default=200)
     parser.add_argument('--effect', help='Name of effect to use. ("files" = search for "target_" and effect_info.ini files in path)', default="comp_4c")
     parser.add_argument('--epochs', type=int, help='Number of epochs to run', default=1000)
-    parser.add_argument('--path', help='Directory to pull input (and maybe target) data from (default: None, means only synthesized-on-the-fly data)', default=None)
+    parser.add_argument('--lrmax', type=float, help="max learning rate", default=1e-4) # Note: lrmax should be obtained by running lr_finder in learningrate.py
     parser.add_argument('-n', '--num', type=int, help='Number of "data points" (audio clips) per epoch', default=200000)
+    parser.add_argument('--path', help='Directory to pull input (and maybe target) data from (default: None, means only synthesized-on-the-fly data)', default=None)
     parser.add_argument('--sr', type=int, help='Sampling rate', default=44100)
     parser.add_argument('--scale', type=float, help='Scale factor (of input size & whole model)', default=1.0)
     parser.add_argument('--shrink', type=int, help='Shink output chunk relative to input by this divisor', default=4)
-    parser.add_argument('--apex', help="optimization setting to use with NVIDIA apex", default="O0")
     parser.add_argument('-t','--target', help="type of target: chunk or stream", default="stream")
     args = parser.parse_args()
 
@@ -94,6 +95,6 @@ if __name__ == "__main__":
     # call the trianing routine
     st.train.train(epochs=args.epochs, n_data_points=args.num, batch_size=args.batch, device=device, sr=args.sr,\
         effect=effect, datapath=args.path, scale_factor=args.scale, shrink_factor=args.shrink,
-        apex_opt=args.apex, target_type=args.target)
+        apex_opt=args.apex, target_type=args.target, lr_max=args.lrmax)
 
 # EOF

@@ -33,13 +33,22 @@ def get_1cycle_schedule(lr_max = 1e-3, n_data_points = 8000, epochs = 200,
   lr_start = lr_max/div_factor
   lr_end = lr_start/1e4
   n_iter = n_data_points * epochs // batch_size     # number of iterations
-  a1 = int(n_iter * pct_start)
+  a1 = int(n_iter * pct_start)                      # boundary between increasing and decreasing
   a2 = n_iter - a1
 
   # make look-up table
-  lrs_first = np.linspace(lr_start, lr_max, a1)            # linear growth
+  #lrs_first = np.linspace(lr_start, lr_max, a1)            # linear growth
+  lrs_first = (lr_max-lr_start)*(1-np.cos(np.linspace(0,np.pi,a1)))/2 + lr_start  # cosine growth
   lrs_second = (lr_max-lr_end)*(1+np.cos(np.linspace(0,np.pi,a2)))/2 + lr_end  # cosine annealing
   lrs = np.concatenate((lrs_first, lrs_second))
-  return lrs
+
+  # also schedule the momentum
+  mom_min, mom_max = 0.85, 0.95
+  mom_avg, mom_amp = (mom_min+mom_max)/2, (mom_max-mom_min)/2
+  mom_first = mom_avg + mom_amp*np.cos(np.linspace(0,np.pi,a1))
+  mom_second = mom_avg - mom_amp*np.cos(np.linspace(0,np.pi,a2))
+  moms = np.concatenate((mom_first, mom_second))
+
+  return lrs, moms
 
 # EOF
