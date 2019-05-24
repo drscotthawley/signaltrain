@@ -72,6 +72,14 @@ def undo_sliding_window(x, overlap, flatsize=None):
     else:
         return x
 
+def normish(y, amp_range=None, randfunc=np.random.rand):
+    """
+    Keep signal from exceeding -1,1...but still have random amplitude
+    """
+    amp_range = [0.6, 0.9] if amp_range is None else amp_range
+    y = y/np.max(np.abs(y)) * ((amp_range[1]-amp_range[0])*randfunc()+amp_range[0])
+    return y
+
 
 #--- List of test signals:
 def pinknoise(N):
@@ -93,7 +101,7 @@ def randsine(t, randfunc=np.random.rand, amp_range=[0.2,0.9], freq_range=[5,150]
         freq = freq_range[0] + (freq_range[1]-freq_range[0])*randfunc()
         t0 = randfunc() * t[-1] if t0_fac is None else t0_fac*t[-1]
         y += amp*np.cos(freq*(t-t0))
-    return y
+    return normish(y, randfunc=randfunc)
 
 def box(t, randfunc=np.random.rand, t0_fac=None, delta=None):
     """
@@ -102,7 +110,7 @@ def box(t, randfunc=np.random.rand, t0_fac=None, delta=None):
     """
     height_bgn, height_mid, height_end = 0.15*randfunc(), 0.35*randfunc()+0.6, 0.2*randfunc()+0.1
     maxi = len(t)
-    delta = np.random.choice([0, np.random.randint(100) ]) if delta is None else delta # maybe slope the sides ; delta=0 is an immediate step response
+    delta = 0 # np.random.choice([0, np.random.randint(100) ]) if delta is None else delta # maybe slope the sides ; delta=0 is an immediate step response
     i_up = delta+int( 0.3*randfunc() * maxi) if t0_fac is None else int(t0_fac*maxi)
     i_dn = min( i_up + int( (0.3+0.35*randfunc())*maxi), maxi-delta-1)   # time for jumping back down
     x = height_end*np.ones(t.shape[0]).astype(t.dtype, copy=False)  # unit amplitude
@@ -125,16 +133,18 @@ def expdecay(t, randfunc=np.random.rand, t0_fac=None, high_fac=None, low_fac=Non
     x[np.where(t < t0)] = height_low   # without this, it grow exponentially 'to the left'
     return x
 
-def pluck(t, randfunc=np.random.rand, freq_range=[50,6400], n_tones=None, t0_fac=None):
+def pluck(t, randfunc=np.random.rand, freq_range=[50,6400], n_tones=None, t0_fac=None, amp=None):
     y = np.zeros(t.shape[0])
     """ supposed to be like a plucked string; but with a few random tones as well"""
     if n_tones is None: n_tones=np.random.randint(1,4)
     for i in range(n_tones):
-        amp0 = (0.45 * randfunc() + 0.5) * np.random.choice([-1, 1])
+        amp0 = (0.45 * randfunc() + 0.5) * np.random.choice([-1, 1]) if amp is None else amp
         t0 = (2. * randfunc()-1)*0.3 * t[-1] if t0_fac is None else t0_fac*t[-1] # for phase
         freq = freq_range[0] + (freq_range[1]-freq_range[0])*randfunc()
         y += amp0*np.sin(freq * (t-t0))
-    return y * expdecay(t, t0_fac=t0_fac)
+    y =  y * expdecay(t, t0_fac=t0_fac)
+    return normish(y, randfunc=randfunc)
+
 
 def ampexpstepup(t, randfunc=np.random.rand, freq=None, freq_range=[400,5000], start_dB=-40):
     """ sine wave with exponentially increase amplitude
@@ -147,18 +157,20 @@ def ampexpstepup(t, randfunc=np.random.rand, freq=None, freq_range=[400,5000], s
     env = np.power(10.0, env_dB/10)                      # envelope in float values
     if freq is None:  #  Otherwise, the user has specified a frequency in Hz
         freq = freq_range[0] + (freq_range[1]-freq_range[0])*randfunc() # pick a freq
-    return  env * np.sin(freq * t)
+    y =  env * np.sin(freq * t)
+    return normish(y, randfunc=randfunc)
 
-def sweep(t, randfunc=np.random.rand, freq_range=[20,20000], amp_too=False):
+
+def sweep(t, randfunc=np.random.rand, freq_range=[20,20000], amp=None, amp_too=False):
     """exponential frequency sweep
     """
     tmax = t[-1]
     lnfr = np.log(freq_range[1]/freq_range[0])  # ln of frequency ratio
-    amp = 0.9*randfunc()
+    amp = 0.9*randfunc() if amp is None else amp
     y =  amp* np.sin( 20 *2*np.pi*tmax/lnfr * (np.exp(t/tmax*lnfr)-1) )
     if amp_too:         # exponentially increase the amplitude as well
         y *= np.exp(lnfr*t/tmax)
-    return y
+    return normish(y, randfunc=randfunc)
 
 def spikes(t, n_spikes=50, randfunc=np.random.rand):  # "bunch of random spikes"
     x = np.zeros(t.shape[0])
@@ -286,35 +298,37 @@ def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
         chooser = np.random.randint(0, 11)
 
     if 0 == chooser:                     # sine, with random phase, amp & freq
-        return randsine(t, t0_fac=t0_fac)
+        y = randsine(t, t0_fac=t0_fac)
     elif 1 == chooser:                  # noisy sine
-        return randsine(t,t0_fac=t0_fac) + 0.2*np.random.rand()*pinknoise(t.shape[0]) + 0.2*np.random.rand()*(2*np.random.rand(t.shape[0])-1)
+        y =  randsine(t,t0_fac=t0_fac) + 0.2*np.random.rand()*pinknoise(t.shape[0]) + 0.2*np.random.rand()*(2*np.random.rand(t.shape[0])-1)
     elif 2 == chooser:                    #  "pluck", decaying sine wave
-        return pluck(t,t0_fac=t0_fac)
+        y =  pluck(t,t0_fac=t0_fac)
     elif 3 == chooser:                   # ramp up then down
-        return triangle(t,t0_fac=t0_fac)
+        y =  triangle(t,t0_fac=t0_fac)
     elif (4 == chooser):                # 'box'
-        return box(t,t0_fac=t0_fac)
+        y =  box(t,t0_fac=t0_fac)
     elif 5 == chooser:                 # "bunch of spikes"
-        return spikes(t)
+        y =  spikes(t)
     elif 6 == chooser:                # noisy box
-        return box(t,t0_fac=t0_fac) * (2*np.random.rand(t.shape[0])-1) # don't use pinknoise here
+        y =  box(t,t0_fac=t0_fac) * (2*np.random.rand(t.shape[0])-1) # don't use pinknoise here
     elif 7 == chooser:                # noisy 'pluck'
         amp_n = (0.3*randfunc()+0.1)
-        return pluck(t,t0_fac=t0_fac) + amp_n*pinknoise(t.shape[0])
+        y =  pluck(t,t0_fac=t0_fac) + amp_n*pinknoise(t.shape[0])
     elif 8 == chooser:
-        return ampexpstepup(t, start_dB=-30) # increasing amplitude-steps of sine wave
+        y =  ampexpstepup(t, start_dB=-30) # increasing amplitude-steps of sine wave
     elif 9 == chooser:                       # freq sweep
         f_low, f_high  = np.random.randint(20,1000), np.random.randint(1000,20000)
         amp_too = np.random.choice([False,False,True])
-        return sweep(t, freq_range=[f_low, f_high], amp_too=amp_too)
+        y =  sweep(t, freq_range=[f_low, f_high], amp_too=amp_too)
     elif 10 == chooser:                     # box plus noise
-        return st.audio.box(t) + 0.2*np.random.rand()*(2*np.random.rand(t.shape[0])-1) + 0.2*np.random.rand()*pinknoise(t.shape[0])
+        y =  box(t) + 0.2*np.random.rand()*(2*np.random.rand(t.shape[0])-1) + 0.2*np.random.rand()*pinknoise(t.shape[0])
     elif 11 == chooser:                  # just noise
         amp_n = (0.6*randfunc()+0.2)
-        return amp_n*pinknoise(t.shape[0])
+        y =  amp_n*pinknoise(t.shape[0])
     else:
-        return 0.5*(synth_input_sample(t)+synth_input_sample(t)) # superposition of the above
+        y =  0.5*(synth_input_sample(t)+synth_input_sample(t)) # superposition of the above
+    eps = 1e-8
+    return y * np.random.choice([-1,1]) + np.random.rand(len(y))*eps # flip phase + tiny noise
 #---- End test signals
 
 
