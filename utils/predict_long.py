@@ -10,8 +10,10 @@ Can be run as a standalone utility routine, or as a function called from another
 import numpy as np
 import torch
 import sys
+sys.path.append('/home/shawley/signaltrain')
 sys.path.append('..')
 import signaltrain as st
+import glob
 
 # NVIDIA Apex for mixed-precision training
 have_apex = False
@@ -66,7 +68,10 @@ def predict_long(signal, knobs_nn, model, chunk_size, out_chunk_size, sr=44100, 
     unique = x.shape[1] + (x.shape[0]-1)*(x.shape[1]-overlap) # number of unique values in windowed x (including extra zeros but not overlaps)
     num_extra = unique - signal.size                          # difference between that and original signal
     print("predict_long:  y_pred.shape, num_extra = ",y_pred.shape, num_extra)
-    return  y_pred[0:-num_extra]
+    if num_extra > 0:
+        return y_pred[0:-num_extra]
+    else:
+        return y_pred
 
 
 def calc_ct(signal, effect, knobs_wc, out_chunk_size, chunk_size, sr=44100):
@@ -142,19 +147,17 @@ if __name__ == "__main__":
     print("reading input file ",infile)
     signal, sr = st.audio.read_audio_file(infile, sr=sr)
     print("signal.shape = ",signal.shape)
+    y_ct = None
 
     ##### KNOB SETTINGS HERE
+    # Can hard code them here or, for 'files' effects, they're inferred from the target (below)
     #knobs_wc = np.array([-30, 2.5, .002, .03])  # 4-knob compressor settings, for Windy Places in demo
     #knobs_wc = np.array([-20, 5, .01, .04])  # 4-knob compressor settings, for Leadfoot in demo
     #knobs_wc = np.array([-40])  # comp with only 1 knob 'thresh'
     #knobs_wc = np.array([1,85])
     knobs_wc = np.array([-30.0, 5.0, 0.04, 0.04])
-    #knobs_wc = np.array([0,65])
-    print("knobs_wc  =",knobs_wc)
+    print("default knobs_wc  =",knobs_wc)
 
-    # convert to NN parameters for knobs
-    kr = np.array(knob_ranges)
-    knobs_nn = (knobs_wc - kr[:,0])/(kr[:,1]-kr[:,0]) - 0.5
 
     # Generate Target audio  - in one big stream: "streamed target" data
     print("\nhello. args.effect=",args.effect)
@@ -169,9 +172,17 @@ if __name__ == "__main__":
         elif args.effect == 'files':
             print('going to try to load what we can')
             #target_file = '/home/shawley/datasets/LA2A_LC_032019/Val/target_218_LA2A_3c__1__85.wav'
-            target_file = '/home/shawley/datasets/LA2A_03_Hawleybuild/Test/target_235_LA2A_2c__0__65.wav'
+            # use the input filename and the knob vals to get the target val
+            target_file = infile.replace('input','target').replace('.wav','')
+            target_file = glob.glob(target_file+"*")[0]
+            print(" Reading target_file = ",target_file)
             y_st, _ = st.audio.read_audio_file(target_file)
             print("-------------------------------   len(y_st) = ",len(y_st))
+            # get the knob settings from the corresponding target filename
+            subs = target_file.replace('.wav','').split('__')
+            knobs_wc = [np.float(x) for x in subs[1:]]
+            knobs_wc = np.array(knobs_wc)
+            print("inferred knobs_wc = ",knobs_wc)
         else:
             print("WARNING: That effect not implemented yet. Skipping target generation.")
 
@@ -179,6 +190,9 @@ if __name__ == "__main__":
             y_st, _ = effect.go(signal, knobs_nn)
             y_ct = calc_ct(signal, effect, knobs_wc, out_chunk_size, chunk_size)
 
+    # convert to NN parameters for knobs
+    kr = np.array(knob_ranges)
+    knobs_nn = (knobs_wc - kr[:,0])/(kr[:,1]-kr[:,0]) - 0.5
 
     # Call the predict_long routine
     print("\nCalling predict_long()...")
@@ -195,10 +209,16 @@ if __name__ == "__main__":
     y_out[-len(y_pred):] = y_pred
 
     print("Output y_out.shape = ",y_out.shape)
-    st.audio.write_audio_file("input.wav", signal, sr=44100)
-    st.audio.write_audio_file("y_pred.wav", y_out, sr=44100)
+
+    # write output files, which have been properly aligned
+    tagstr = ''
+    for i in range(len(knobs_wc)):
+        tagstr += '__'+str(int(knobs_wc[i]))
+    st.audio.write_audio_file("pl_input"+tagstr+".wav", signal, sr=44100)
+    st.audio.write_audio_file("pl_pred"+tagstr+".wav", y_out, sr=44100)
     if do_target:
-        st.audio.write_audio_file("y_st.wav", y_st, sr=44100)
-        st.audio.write_audio_file("y_ct.wav", y_ct, sr=44100)
+        st.audio.write_audio_file("pl_st"+tagstr+".wav", y_st, sr=44100)
+        if y_ct is not None:
+            st.audio.write_audio_file("pl_ct"+tagstr+".wav", y_ct, sr=44100)
 
     print("Finished.")

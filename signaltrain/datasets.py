@@ -14,9 +14,11 @@ import os
 import glob
 from torch.utils.data import Dataset
 from . import audio
+import sys
+import random
 
 
-def do_augment(x,y, rand_invert=True, mult_some=False, add_some=True):
+def do_augment(x, y, rand_invert=True, mult_some=False, add_some=False):
     """
     A few simple hacks for data augmentation, to make the dataset go further.
     Nothing fancy: Don't want to mess up the target data if this is a file-based dataset.
@@ -62,9 +64,14 @@ def worker_init(worker_id):
 class AudioFileDataSet(Dataset):
     """
     Read from premade audio files.  Is a subclass of PyTorch Dataset so you can use DataLoader
+    TODO: self, how about writing more documentation for this?
     """
     def __init__(self, chunk_size, effect, sr=44100, path="./Train/", datapoints=8000, \
-        dtype=np.float32, preload=True, skip_factor=0, rerun=False, y_size=None, augment=True):
+        dtype=np.float32, preload=True, rerun=False, y_size=None, augment=True,
+        align_end=True, view_of=None):
+        """
+        view_of: as a memory-saving experiment, pass another dataset.
+        """
         super(AudioFileDataSet, self).__init__()
 
         self.chunk_size = chunk_size
@@ -74,7 +81,7 @@ class AudioFileDataSet(Dataset):
         self.dtype = dtype
         self.datapoints = datapoints
         self.preload = preload
-        self.skip_over = int(self.chunk_size * skip_factor)  # This will overwrite the first part of y with x
+        self.align_end = align_end # found that some of our audio files have starting points that are not aligned, but their einding points are.
         self.rerun_effect = rerun  # a hack to avoid causality issues at chunk boundaries
         if y_size is None:
             self.y_size = chunk_size
@@ -91,20 +98,27 @@ class AudioFileDataSet(Dataset):
             self.process_audio()
         '''
 
-        # get a list of available files.  Note that knob settings are included to the target filenames
-        self.input_filenames = sorted(glob.glob(self.processed_dir+self.path+'/'+'input_*'))
-        self.target_filenames = sorted(glob.glob(self.processed_dir+self.path+'/'+'target_*'))
-        print("AudioFileDataSet: Found",len(self.input_filenames),"input files and",
-            len(self.target_filenames)," target files in path",self.path)
-        assert len(self.input_filenames) == len(self.target_filenames)   # TODO: One can imagine a scheme with multiple targets per input
+        if view_of is None:
+            print("Hiya")
+            # get a list of available files.  Note that knob settings are included to the target filenames
+            self.input_filenames = sorted(glob.glob(self.processed_dir+self.path+'/'+'input_*'))
+            self.target_filenames = sorted(glob.glob(self.processed_dir+self.path+'/'+'target_*'))
+            print("AudioFileDataSet: Found",len(self.input_filenames),"input files and",
+                len(self.target_filenames)," target files in path",self.path)
+            assert len(self.input_filenames) == len(self.target_filenames)   # TODO: One can imagine a scheme with multiple targets per input
 
-        print("  AudioFileDataSet: Check to make sure input & target filenames sorted together in the same order:")
-        for i in range(min(10, len(self.input_filenames))):
-            print("      i =",i,", input_filename =",os.path.basename(self.input_filenames[i]),\
-              ", target_filename =",os.path.basename(self.target_filenames[i]))
+            print("  AudioFileDataSet: Check to make sure input & target filenames sorted together in the same order:")
+            for i in range(min(10, len(self.input_filenames))):
+                print("      i =",i,", input_filename =",os.path.basename(self.input_filenames[i]),\
+                  ", target_filename =",os.path.basename(self.target_filenames[i]))
 
-        if self.preload:  # load data files into memory first
-            self.preload_audio()
+            if self.preload:  # load data files into memory first
+                self.preload_audio()
+        else:
+            print(" *** Warning, using only a view of earlier dataset")
+            self.x, self.y, self.knobs = view_of.x, view_of.y, view_of.knobs
+            self.num_knobs = view_of.num_knobs
+
 
     def preload_audio(self):
         # This is much faster than reading files anew each epoch, but comes at the cost of assuming a uniform dataset.
@@ -114,30 +128,38 @@ class AudioFileDataSet(Dataset):
         audio_in, audio_targ, knobs_wc = self.read_one_new_file_pair()  # read one file for sizing
         dur = len(audio_in)/self.sr
         self.num_knobs = len(knobs_wc)
-        self.x = np.zeros((files_to_load,len(audio_in) ),dtype=self.dtype)
-        self.y = np.zeros((files_to_load,len(audio_targ) ),dtype=self.dtype)
+        self.x, self.y = [],[]
+        #self.x = np.zeros((files_to_load,len(audio_in) ),dtype=self.dtype)
+        #self.y = np.zeros((files_to_load,len(audio_targ) ),dtype=self.dtype)
         self.knobs = np.zeros((files_to_load, self.num_knobs ),dtype=self.dtype)
         print_every = files_to_load//10 if 0!= files_to_load//10 else 1
         for i in range(files_to_load):
             tmp_x, tmp_y,  self.knobs[i] = self.read_one_new_file_pair(idx=i)
+
             if ((i+1) % print_every == 0) or (i+1 == files_to_load):
-                print("\r       i = ",i+1,"/",files_to_load," len =",len(tmp_x), "dur=",len(tmp_x)/44100.0/60," min")
+                print("\r       i = ",i+1,"/",files_to_load," len x =",len(tmp_x), "dur=",len(tmp_x)/44100.0/60," min", " len y =",len(tmp_y))
+
+            if (len(tmp_x) != len(tmp_y)):
+                print("  ***Warning: Length mismatch. input & output filenames:",
+                self.input_filenames[i],self.target_filenames[i])
+                if self.align_end:
+                    minlen = min(len(tmp_x), len(tmp_y))
+                    print("   Aligning to ends:")
+                    print("      Before alignment: tmp_x.shape, tmp_y.shape = ",tmp_x.shape, tmp_y.shape)
+                    tmp_x, tmp_y = tmp_x[-minlen:], tmp_y[-minlen:]
+                    print("      After alignment:  tmp_x.shape, tmp_y.shape = ",tmp_x.shape, tmp_y.shape)
 
             if self.effect.is_inverse:
                 tmp_x, tmp_y = tmp_y, tmp_x         # for effects that reverse 'input' and 'output' (for de-____ effects)
 
-            x_len = min( tmp_x.shape[0], self.x.shape[1] )
-            y_len = min( tmp_y.shape[0], self.y.shape[1] )
-            self.x[i,0:x_len], self.y[i,0:y_len] = tmp_x[0:x_len], tmp_y[0:y_len] # only copy what we've allocated space for
-        if (self.skip_over > 0):
-            print("\nAudioFileDataSet: We'll be skipping the first",self.skip_over,"samples in each chunk")
-            self.y[:,0:self.skip_over] = self.x[:,0:self.skip_over] # overwrite first part of targets, to facilitate training
-            print("Checking overwrite: diff = ",np.sum(np.abs(self.y[:,0:self.skip_over] - self.x[:,0:self.skip_over])) )
-        print("    ...done preloading")
+            # add audio to the lists that make up the datasets
+            self.x.append(tmp_x)
+            self.y.append(tmp_y)
+
+        print("    ...finished preloading")
 
     def __len__(self):
         return self.datapoints
-        #return len(self.input_filenames)
 
     def process_audio(self):  # TODO: not used yet following torchaudio
         """ Render raw audio as pytorch-friendly file. TODO: not done yet.
@@ -178,7 +200,8 @@ class AudioFileDataSet(Dataset):
         # parse knobs from target filename
         knobs_wc = self.parse_knob_string(self.target_filenames[idx])
 
-        ''' # only rerun effect on chunks. see get_single_chunk() below
+        '''# Keeping this in code in case I want to switch it on for diagnostic reasons later
+         # only rerun effect on chunks. see get_single_chunk() below
         if self.rerun_effect: # run effect on entire file; this for checking/diagnostic only; can ignore for typical uses
             audio_orig = np.copy(audio_targ)
             audio_targ, audio_in = self.effect.go_wc(audio_in, knobs_wc)
@@ -198,13 +221,13 @@ class AudioFileDataSet(Dataset):
         """
         Grabs audio and knobs either from files or from preloaded buffer(s)
         """
-        if not self.preload:
-            in_audio, targ_audio, knobs_wc = self.read_one_new_file_pair() # read x, y, knobs
-        else:
-            i = np.random.randint(0,high=self.x.shape[0])  # pick a random line from preloaded audio
+        if self.preload:  # This will typically be the case
+            i = np.random.randint(0,high=len(self.x))  # pick a random line from preloaded audio
             in_audio, targ_audio, knobs_wc = self.x[i], self.y[i], self.knobs[i]  # note these might be, e.g. 10 seconds long
+        else:
+            in_audio, targ_audio, knobs_wc = self.read_one_new_file_pair() # read x, y, knobs
 
-        # Grab a random chunk from audio
+        # Grab a random chunk from within total audio nfile
         assert len(in_audio) > self.chunk_size, f"Error: len(in_audio)={len(in_audio)}, must be > self.chunk_size={self.chunk_size}"
         ibgn = np.random.randint(0, len(in_audio) - self.chunk_size)
         x_item = in_audio[ibgn:ibgn+self.chunk_size]
@@ -212,9 +235,6 @@ class AudioFileDataSet(Dataset):
 
         if self.rerun_effect:  # re-run the effect on this chunk , and replace target audio
             y_item, x_item = self.effect.go_wc(x_item, knobs_wc)   # Apply the audio effect
-
-        if (self.skip_over > 0):
-            y_item[0:self.skip_over] = x_item[0:self.skip_over]
 
         y_item = y_item[-self.y_size:]   # Format for expected output size
 
@@ -290,6 +310,8 @@ class SynthAudioDataSet(Dataset):
         """
         if chooser is None:
             chooser = np.random.choice([0,1,2,4,6,7])  # for compressor
+            #chooser = np.random.choice([0,1,3,4,6,10,2,7,9]) # for compressor & more
+            #chooser = 4  # for just step response ('cheating')
             #chooser = np.random.choice([1,3,5,6,7])  # for echo
 
         x = audio.synth_input_sample(self.t, chooser)
