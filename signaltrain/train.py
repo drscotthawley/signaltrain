@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 import os, sys
 import time
 from signaltrain import audio, io_methods, learningrate, datasets, loss_functions, misc
-from signaltrain.nn_modules import nn_proc_sa as nn_proc
+from signaltrain.nn_modules import nn_proc as nn_proc
 
 # NVIDIA Apex for mixed-precision training
 have_apex = False
@@ -26,7 +26,7 @@ except ImportError:
 
 
 def eval_status_save(model, effect, epoch, epochs, lr, mom, device, dataloader_val, logfilename, first_time,
-    beta, vl_avg, checkpointname, parallel, optimizer, data_point, smoothed_loss, y_size, sr, status_every,
+    beta, vl_avg, out_checkpointname, parallel, optimizer, data_point, smoothed_loss, y_size, sr, status_every,
     plot_every=10, cp_every=25, scale_by_freq=None):
     """
     Status messages and run-time diagnostics.
@@ -68,7 +68,7 @@ def eval_status_save(model, effect, epoch, epochs, lr, mom, device, dataloader_v
 
     # save checkpoint of model to file, which can be loaded later
     if ((epoch+1) % cp_every == 0) or (epoch==epochs-1):
-        misc.save_checkpoint(checkpointname, model, epoch, parallel, optimizer, effect, sr)
+        misc.save_checkpoint(out_checkpointname, model, epoch, parallel, optimizer, effect, sr)
 
     # time estimate (got tired of calcuting this by hand every time!)
     if ((epoch+1)==1):
@@ -82,7 +82,7 @@ def eval_status_save(model, effect, epoch, epochs, lr, mom, device, dataloader_v
 
 
 def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, mom_sched,
-    dataloader, dataloader_val, y_size, parallel, logfilename, checkpointname,
+    dataloader, dataloader_val, y_size, parallel, logfilename, out_checkpointname,
     plot_every=10, cp_every=25, sr=44100, lr_max=1e-4):
     """
     The actual training loop called by train() below, after setup has occurred
@@ -155,7 +155,7 @@ def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, m
 
         vl_avg = eval_status_save(model, effect, epoch, epochs, lr, mom, device, dataloader_val,
             logfilename, first_time, beta, vl_avg,
-            checkpointname, parallel, optimizer, data_point, smoothed_loss, y_size, sr,
+            out_checkpointname, parallel, optimizer, data_point, smoothed_loss, y_size, sr,
             status_every, scale_by_freq=scale_by_freq)
 
     # end of loop over all epochs
@@ -166,7 +166,8 @@ def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, m
 
 def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_size=20,
     device=torch.device("cuda:0"), plot_every=10, cp_every=25, sr=44100, datapath=None,
-    scale_factor=1, shrink_factor=4, apex_opt="O0", target_type="stream", lr_max=1e-4):
+    scale_factor=1, shrink_factor=4, apex_opt="O0", target_type="stream", lr_max=1e-4,
+    in_checkpointname = 'modelcheckpoint.tar'):
     """
     Main training routine for signaltrain
 
@@ -184,6 +185,7 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
                           For Turing cards (e.g. RTX 2080 Ti), set this to "O2"
         target_type:      "chunk" (re-run the effect for each chunk) or "stream" (apply effect to whole audio stream)
         lr_max:           maximum learning rate
+        in_checkpointname:   filename of previous checkpoint to load from (if it exists)
     """
 
     # print info about this training run
@@ -195,10 +197,23 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
     effect.info()  # Print effect settings
 
     # Setup the Model
-    #model = nn_proc.AsymMPAEC(expected_time_frames, ft_size=ft_size, hop_size=hop_size, n_knobs=num_knobs, output_tf=output_time_frames)
+    # check to see if there's a checkpoint
+    state_dict, rv = misc.load_checkpoint(in_checkpointname, fatal=False)
+    if state_dict != {}:    # load metadata from a checkpoint if it exists
+        #model.load_state_dict(state_dict)
+        scale_factor, shrink_factor = rv['scale_factor'], rv['shrink_factor']
+        knob_names, knob_ranges = rv['knob_names'], rv['knob_ranges']
+        model_num_knobs = len(knob_names)
+        sr = rv['sr']
+        chunk_size, out_chunk_size = rv['in_chunk_size'], rv['out_chunk_size']
+
+    # initialize from scratch
     model = nn_proc.st_model(scale_factor=scale_factor, shrink_factor=shrink_factor, num_knobs=num_knobs, sr=sr)
+    if state_dict != {}:
+        model.load_state_dict(state_dict)   # overwrite the weights using the input checkpoint if it exists
     chunk_size, out_chunk_size = model.in_chunk_size, model.out_chunk_size
     y_size = out_chunk_size
+
     print("Model defined.  Number of trainable parameters:",sum(p.numel() for p in model.parameters() if p.requires_grad))
     print("      model.in_chunk_size, model.out_chunk_size = ",model.in_chunk_size, model.out_chunk_size)
     model.to(device)
@@ -208,9 +223,13 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
     lr_sched, mom_sched = learningrate.get_1cycle_schedule(lr_max=lr_max, n_data_points=n_data_points, epochs=epochs, batch_size=batch_size)
     maxiter = len(lr_sched)
 
-    synth_data = datapath is None # Are we synthesizing data or do we expect it to come from files
+    # Initialize optimizer. given our "random" training data, weight decay seem to doesn't help but rather slows training way down
+    optimizer = torch.optim.Adam(list(model.parameters()), lr=lr_sched[0], weight_decay=0)
+    # TODO: should also set optimizer state from checkpoint
+
 
     # Setup/load data
+    synth_data = datapath is None # Are we synthesizing data or do we expect it to come from files
     if synth_data:  # synthesize input & target data
         dataset = datasets.SynthAudioDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points, y_size=out_chunk_size, augment=True)
         dataset_val = datasets.SynthAudioDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4, recycle=True, y_size=out_chunk_size, augment=False)
@@ -221,15 +240,6 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
     dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=10, shuffle=True, worker_init_fn=datasets.worker_init) # need worker_init for more variance
     dataloader_val = DataLoader(dataset_val, batch_size=batch_size, num_workers=10, shuffle=False)
 
-    # Initialize optimizer. given our "random" training data, weight decay seem to doesn't help but rather slows training way down
-    optimizer = torch.optim.Adam(list(model.parameters()), lr=lr_sched[0], weight_decay=0)
-
-    # Load from checkpoint if it exists
-    checkpointname = 'modelcheckpoint.tar'
-    state_dict, rv = misc.load_checkpoint(checkpointname, fatal=False)
-    if state_dict != {}:
-        model.load_state_dict(state_dict)
-        # TODO: should also set optimizer state from checkpoint
 
 
     # Mixed precision:  Initialize NVIDIA Apex/Amp.  Amp accepts either values or strings for
@@ -252,8 +262,9 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
         myfile.close()
 
     # Now that everything's set up, call the training loop
+    out_checkpointname = "modelcheckpoint.tar"
     train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, mom_sched, dataloader, dataloader_val,
-        y_size, parallel, logfilename, checkpointname, sr=sr, lr_max=lr_max)
+        y_size, parallel, logfilename, out_checkpointname, sr=sr, lr_max=lr_max)
 
     return None
 

@@ -33,6 +33,7 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--apex', help="optimization setting to use with NVIDIA apex", default="O0")
     parser.add_argument('-b', '--batch', type=int, help="batch size", default=200)
+    parser.add_argument('--checkpoint', help='Name of model checkpoint .tar file', default="modelcheckpoint.tar")
     parser.add_argument('--effect', help='Name of effect to use. ("files" = search for "target_" and effect_info.ini files in path)', default="comp_4c")
     parser.add_argument('--epochs', type=int, help='Number of epochs to run', default=1000)
     parser.add_argument('--lrmax', type=float, help="max learning rate", default=1e-4) # Note: lrmax should be obtained by running lr_finder in learningrate.py
@@ -95,6 +96,6 @@ if __name__ == "__main__":
     # call the trianing routine
     st.train.train(epochs=args.epochs, n_data_points=args.num, batch_size=args.batch, device=device, sr=args.sr,\
         effect=effect, datapath=args.path, scale_factor=args.scale, shrink_factor=args.shrink,
-        apex_opt=args.apex, target_type=args.target, lr_max=args.lrmax)
+        apex_opt=args.apex, target_type=args.target, lr_max=args.lrmax, in_checkpointname=args.checkpoint)
 
 # EOF
