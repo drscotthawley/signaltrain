@@ -103,6 +103,138 @@ class AsymAutoEncoder(nn.Module):
         return result
 
 
+class cnnblock(nn.Module):
+    def __init__(self, bn_size=1):
+        super(cnnblock, self).__init__()
+        self.myblock = nn.Sequential(
+            nn.Conv2d(1, 1, 3, stride=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2, padding=1),
+            nn.BatchNorm2d(bn_size)
+        )
+    def forward(self, input):
+        return self.myblock(input)
+
+class cnntransblock(nn.Module):
+    def __init__(self, k=2, bn_size=1):
+        super(cnntransblock, self).__init__()
+        self.myblock = nn.Sequential(
+            nn.ConvTranspose2d(1, 1, k, stride=2),
+            nn.ReLU(),
+            nn.BatchNorm2d(bn_size)
+        )
+    def forward(self, input):
+        return self.myblock(input)
+
+
+class AsymCNNAutoEncoder(nn.Module):
+    def __init__(self, T=25, R=64, K=3, OT=None, use_bias=True, use_dropout=False):
+        super(AsymCNNAutoEncoder, self).__init__()
+
+        # Parameters
+        self._T = T   # expected number of time frames
+        self._R = R   # decomposition rank - (output) size of first encoded layer of activations
+        self._K = K   # number of knobs
+        if OT is None:  # expected number of output time frames
+            self._OT = T
+        else:
+            self._OT = OT
+        self.use_bias = use_bias
+
+        print("AsymCNNAutoEncoder __init__: T, R, K, OT = ",T, R, K, OT)
+
+        # Analysis
+        rf = 2   # "reduction factor": size ratio between successive layers in autoencoder
+        self.fnn_enc = nn.Linear(self._T, self._R, bias=self.use_bias)
+
+        #self.fnn_enc2 = nn.Linear(self._R, self._R//rf, bias=self.use_bias)
+        #self.fnn_enc3 = nn.Linear(self._R//rf, self._R//rf**2, bias=self.use_bias)
+        #self.fnn_enc4 = nn.Linear(self._R//rf**2, self._R//rf**2, bias=self.use_bias)
+        #self.fnn_enc = nn.Conv2d(1, 1, 3)
+        self.fnn_enc2 = cnnblock()
+        self.fnn_enc3 = cnnblock()
+        self.fnn_enc4 = cnnblock()
+
+        self.fnn_addknobs = nn.Linear(self._R//rf**3 + self._K, self._R//rf**2, bias=self.use_bias)
+        self.fnn_backdown = nn.Linear(self._R//rf**2, self._R//rf**3, bias=self.use_bias)
+        self.fnn_dec4 = cnntransblock()
+        self.fnn_dec3 = cnntransblock()
+        self.fnn_dec2 = cnntransblock(k=(3,2))
+        self.outprep = nn.Linear(self._R*2+1, self._R, bias=self.use_bias)
+        self.fnn_dec = nn.Linear(self._R, self._OT, bias=self.use_bias)
+
+        self.layer_list = [self.fnn_enc, self.fnn_enc2, self.fnn_enc3, self.fnn_enc4,
+            self.fnn_addknobs, self.fnn_dec4, self.fnn_dec3, self.fnn_dec2, self.fnn_dec]
+
+        # Activation function(s)
+        self.relu = nn.ELU()#  nn.LeakyReLU()
+        #self.relu = nn.ReLU()
+
+        self.initialize()
+
+    def initialize(self):
+        return # TODO: remove
+        for x in self.layer_list:
+            torch.nn.init.xavier_normal_(x.weight)
+            if self.use_bias:
+                x.bias.data.zero_()
+
+    def forward(self, x_input, knobs, skip_connections='res', log=False):
+        x_input = x_input.transpose(2, 1)  # flip frequency & time (so we operate on time)
+
+        # encoder
+        if log: print("x_input.size = ",x_input.size())
+        z = self.relu(self.fnn_enc(x_input))
+        z = z.unsqueeze(1)  # add 1 "channel"
+        if log: print("1 z.size = ",z.size())
+        z = self.fnn_enc2(z)
+        if log: print("2 z.size = ",z.size())
+        z = self.fnn_enc3(z)
+        if log: print("3 z.size = ",z.size())
+        z = self.fnn_enc4(z)
+        if log: print("4 z.size = ",z.size())
+
+        z = z.squeeze(1)
+        # middle of the autoencoder: merge the knobs
+        knobs_r = knobs.unsqueeze(1).repeat(1, z.size()[1], 1)  # repeat the knobs to make dimensions match
+        if log: print("knobs_r.size = ",knobs_r.size)
+        catted = torch.cat((z,knobs_r),2)
+        if log: print("catted.size = ",catted.size() )
+        z = self.relu( self.fnn_addknobs( catted ) )
+        z = z.unsqueeze(1)
+        if log: print("5 knobs added: z.size() = ",z.size())
+        z = self.fnn_backdown(z)
+        if log: print("5.5 knobs added: z.size() = ",z.size())
+        # decoder
+        z = self.fnn_dec4(z)
+        if log: print("6 z.size() = ",z.size())
+        z = self.fnn_dec3(z)
+        if log: print("7 z.size() = ",z.size())
+        z = self.fnn_dec2(z)
+        if log: print("8 z.size() = ",z.size())
+
+        z = z.squeeze(1)
+        if log: print("9 z.size() = ",z.size())
+
+        # cnn's finished, ready for final Linear map
+
+        if skip_connections == 'exp':           # Refering to an old AES paper for exponentiation
+            z_a = torch.log(self.relu(self.fnn_dec(z)) + 1e-6) * torch.log(x_input[:,-self._OT:,:] + 1e-6)
+            out = torch.exp(z_a)
+        elif skip_connections == 'res':         # Refering to residual connections
+            out = self.relu(self.fnn_dec(z) + x_input[:,:,-self._OT:])
+        elif skip_connections == 'sf':          # Skip-filter
+            out = self.relu(self.fnn_dec(z)) * x_input[:,:,-self._OT:]
+        else:
+            out = self.relu(self.fnn_dec(z))
+
+        result = out.transpose(2, 1)
+        return result
+
+
+
+
+
 class AsymMPAEC(nn.Module):
     """
         Asymmetric Magnitude-Phase AutoEncoder (with Knobs)
@@ -204,6 +336,7 @@ class st_model(nn.Module):
             print(f"    Setting out_chunk_size = y_size = {y_size}")
         self.out_chunk_size = y_size
         self.mpaec = AsymMPAEC(expected_time_frames, ft_size=ft_size, hop_size=hop_size, n_knobs=num_knobs, output_tf=output_time_frames)
+
         #self.freeze()    # TODO: try this out another time
 
     def clip_grad_norm_(self):
