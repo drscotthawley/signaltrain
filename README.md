@@ -83,7 +83,7 @@ To incorporate (or add) other audio files (e.g. music) to this, specify `--inpat
 
 #### Pre-existing datasets
 
-**Working on it:** uploading LA2A dataset (30G) to Zenodo.  Having trouble finding a *reliable and fast* connection while traveling in the UK. 
+[SignalTrain LA2A Dataset](https://zenodo.org/record/3348083) (21.0 GB) ![doi_image](https://zenodo.org/badge/DOI/10.5281/zenodo.3348083.svg) 
 
 
 ### Training
