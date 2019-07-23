@@ -113,6 +113,8 @@ if __name__ == "__main__":
     parser.add_argument('checkpoint', help='Name of model checkpoint .tar file')
     parser.add_argument('audiofile', help='Name of audio file to read')
     parser.add_argument('--effect', help='Name of effect class for generating target', default='comp_4c')
+    parser.add_argument('--knobs', help='String of knob/control settings', default='-30.0, 5.0, 0.04, 0.04')
+    # info is in checkpoint file  parser.add_argument('--path', help='Path from which to load file-based effects', default='')
     args = parser.parse_args()
     print("args =",args)
 
@@ -155,7 +157,8 @@ if __name__ == "__main__":
     #knobs_wc = np.array([-20, 5, .01, .04])  # 4-knob compressor settings, for Leadfoot in demo
     #knobs_wc = np.array([-40])  # comp with only 1 knob 'thresh'
     #knobs_wc = np.array([1,85])
-    knobs_wc = np.array([-30.0, 5.0, 0.04, 0.04])
+    #knobs_wc = np.array([-30.0, 5.0, 0.04, 0.04])
+    knobs_wc = np.fromstring(args.knobs, dtype=np.float32, sep=',')
     print("default knobs_wc  =",knobs_wc)
 
 
@@ -187,7 +190,7 @@ if __name__ == "__main__":
             print("WARNING: That effect not implemented yet. Skipping target generation.")
 
         if 'comp' in args.effect:
-            y_st, _ = effect.go(signal, knobs_nn)
+            y_st, _ = effect.go_wc(signal, knobs_wc)
             y_ct = calc_ct(signal, effect, knobs_wc, out_chunk_size, chunk_size)
 
     # convert to NN parameters for knobs
@@ -213,7 +216,7 @@ if __name__ == "__main__":
     # write output files, which have been properly aligned
     tagstr = ''
     for i in range(len(knobs_wc)):
-        tagstr += '__'+str(int(knobs_wc[i]))
+        tagstr += '__'+str((knobs_wc[i]))
     st.audio.write_audio_file("pl_input"+tagstr+".wav", signal, sr=44100)
     st.audio.write_audio_file("pl_pred"+tagstr+".wav", y_out, sr=44100)
     if do_target:

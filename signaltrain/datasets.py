@@ -99,7 +99,7 @@ class AudioFileDataSet(Dataset):
         '''
 
         if view_of is None:
-            print("Hiya")
+            print("view_of = None. Original data")
             # get a list of available files.  Note that knob settings are included to the target filenames
             self.input_filenames = sorted(glob.glob(self.processed_dir+self.path+'/'+'input_*'))
             self.target_filenames = sorted(glob.glob(self.processed_dir+self.path+'/'+'target_*'))

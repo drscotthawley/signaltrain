@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 import os, sys
 import time
 from signaltrain import audio, io_methods, learningrate, datasets, loss_functions, misc
-from signaltrain.nn_modules import nn_proc
+from signaltrain.nn_modules import nn_proc_sa as nn_proc
 
 # NVIDIA Apex for mixed-precision training
 have_apex = False
@@ -44,7 +44,7 @@ def eval_status_save(model, effect, epoch, epochs, lr, mom, device, dataloader_v
 
         y_val_hat, mag_val, mag_val_hat = model.forward(x_val_cuda, knobs_val_cuda)
         loss_val = loss_functions.calc_loss(y_val_hat.float(), y_val_cuda.float(), mag_val_hat.float(),
-            scale_by_freq=scale_by_freq.float())#, l1_lambda=lr/1000 )
+            scale_by_freq=scale_by_freq)#, l1_lambda=lr/1000 )
         vl_avg = beta*vl_avg + (1-beta)*loss_val.item()    # (running) average val loss
         if 0 == val_batch_num % status_every:
             timediff = time.time() - first_time
@@ -112,13 +112,13 @@ def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, m
             y_hat, mag, mag_hat = model.forward(x_cuda, knobs_cuda) # feed-forward synthesis
 
             # set up loss weighting
-            if scale_by_freq is None:
-                expfac = 7./mag_hat.size()[-1]   # exponential L1 loss scaling by ~1000 times (30dB) over freq range
-                scale_by_freq = torch.exp(expfac* torch.arange(0., mag_hat.size()[-1])).expand_as(mag_hat)
+            #if scale_by_freq is None:
+            #    expfac = 7./mag_hat.size()[-1]   # exponential L1 loss scaling by ~1000 times (30dB) over freq range
+            #    scale_by_freq = torch.exp(expfac* torch.arange(0., mag_hat.size()[-1])).expand_as(mag_hat).float()
 
             # loss evaluation
             loss = loss_functions.calc_loss(y_hat.float(), y_cuda.float(),
-                mag_hat.float(), scale_by_freq=scale_by_freq.float())#, l1_lambda=lr/1000)
+                mag_hat.float(), scale_by_freq=scale_by_freq)#, l1_lambda=lr/1000)
 
             # Status message
             batch_num += 1
@@ -217,7 +217,6 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
     else:           # use prerecoded files for input & target data
         dataset = datasets.AudioFileDataSet(chunk_size, effect, sr=sr,  datapoints=n_data_points, path=datapath+"/Train/",  y_size=out_chunk_size, rerun=(target_type!="stream"), augment=True, preload=True)
         dataset_val = datasets.AudioFileDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4, path=datapath+"/Val/", y_size=out_chunk_size, rerun=(target_type!="stream"), augment=False)
-        #dataset_val = datasets.AudioFileDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4,  y_size=out_chunk_size, augment=False, view_of=dataset) # for saving memory, link Train & Val
 
     dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=10, shuffle=True, worker_init_fn=datasets.worker_init) # need worker_init for more variance
     dataloader_val = DataLoader(dataset_val, batch_size=batch_size, num_workers=10, shuffle=False)
