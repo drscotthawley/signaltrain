@@ -266,7 +266,7 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
     train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, mom_sched, dataloader, dataloader_val,
         y_size, parallel, logfilename, out_checkpointname, sr=sr, lr_max=lr_max)
 
-    return None
+    return model
 
 
 # Minimal debugging execution below; This is not really intended to be run all by itself; use ../run_train.py

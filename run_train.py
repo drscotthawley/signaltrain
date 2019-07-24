@@ -94,8 +94,9 @@ if __name__ == "__main__":
     print("Running with args =",args)
 
     # call the trianing routine
-    st.train.train(epochs=args.epochs, n_data_points=args.num, batch_size=args.batch, device=device, sr=args.sr,\
+    model = st.train.train(epochs=args.epochs, n_data_points=args.num, batch_size=args.batch, device=device, sr=args.sr,\
         effect=effect, datapath=args.path, scale_factor=args.scale, shrink_factor=args.shrink,
         apex_opt=args.apex, target_type=args.target, lr_max=args.lrmax, in_checkpointname=args.checkpoint)
 
+    print("run_train.py: Execution completed.")
 # EOF
