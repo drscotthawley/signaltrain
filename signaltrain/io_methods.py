@@ -8,7 +8,7 @@ import wave as _wave
 from scipy.io.wavfile import write, read
 from sys import platform
 import matplotlib.pylab as plt
-from signaltrain.nn_modules import nn_proc
+from .nn_modules import nn_proc
 
 class AudioIO:
 	""" Class for handling audio input/output operations.
