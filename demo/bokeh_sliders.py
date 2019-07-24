@@ -14,7 +14,7 @@ from bokeh.plotting import figure
 import os, sys
 sys.path.append(os.path.abspath('../'))  # for running from signaltrain/demo/
 import signaltrain as st
-from signaltrain.nn_modules import nn_proc
+from signaltrain import nn_proc
 
 if torch.cuda.is_available():
     device = torch.device("cuda:0")

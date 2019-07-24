@@ -119,7 +119,7 @@ effect.info()
 
 
 # Initialize nn modules
-model = st.nn_modules.nn_proc.st_model(scale_factor=args.scale, shrink_factor=args.shrink, num_knobs=len(effect.knob_names), sr=44100)
+model = st.nn_proc.st_model(scale_factor=args.scale, shrink_factor=args.shrink, num_knobs=len(effect.knob_names), sr=44100)
 chunk_size = model.in_chunk_size
 
 optimizer = torch.optim.Adam(list(model.parameters()), lr=args.lrmax, weight_decay=0)

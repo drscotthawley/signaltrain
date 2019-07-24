@@ -97,7 +97,7 @@ if __name__ == "__main__":
     ## Can be run as standalone app for testing / eval purposes
     import os
     import argparse
-    from signaltrain.nn_modules import nn_proc
+    from signaltrain import nn_proc
 
     # torch device
     if torch.cuda.is_available():

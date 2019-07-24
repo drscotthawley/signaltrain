@@ -9,8 +9,8 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 import os, sys
 import time
-from signaltrain import audio, io_methods, learningrate, datasets, loss_functions, misc
-from signaltrain.nn_modules import nn_proc as nn_proc
+from signaltrain import audio, io_methods, learningrate, datasets, loss_functions, misc, nn_proc
+#from signaltrain.nn_modules import nn_proc as nn_proc
 
 # NVIDIA Apex for mixed-precision training
 have_apex = False

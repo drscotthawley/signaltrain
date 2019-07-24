@@ -1,6 +1,6 @@
 
 # -*- coding: utf-8 -*-
-__author__ = 'S.I. Mimilakis'
+__author__ = 'S.I. Mimilakis & S.H. Hawley'
 __copyright__ = 'MacSeNet'
 
 # imports
