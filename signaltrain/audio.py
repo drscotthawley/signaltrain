@@ -273,7 +273,7 @@ def readaudio_generator(seq_size,  path=os.path.expanduser('~')+'/datasets/signa
     start = -seq_size
     while True:
         if read_new_file:
-            filename = path+'/'+np.random.choice(files)  # pick a random audio file in the directory
+            filename = np.random.choice(files)  # pick a random audio file in the directory
             #print("Reading new data from "+filename+" ")
             data, sr = read_audio_file(filename, sr=sr, mono=mono, norm=norm)
             read_new_file=False   # don't keep switching files  everytime generator is called
