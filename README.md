@@ -119,17 +119,13 @@ Advisories re. options:
 │   ├── train.py              # main training routine
 │   ├── audio.py              # 'most' of the audio and plugin-related routines
 │   ├── data.py               # AudioDataset routines
-│   ├── __init__.py
+│   ├── nn_proc.py            # neural network architecture(s)
+│   ├── cls_fe_dft.py         # convnet trainable STFT routines
+│   ├── cls_fe_dct_bases.py   # utilities used by previous file
 │   ├── io_methods.py         # status messages, and some unused audio routines
 │   ├── learningrate.py       # implentation of fast.ai learning rate scheduling
 │   ├── loss_functions.py     # this is its own file only because one of us made it so ;-)
-│   ├── misc.py               # cosmetics
-│   └── nn_modules            # NN architecture routines: 'fourier' transforms, autoencoder
-|       |                     # # these files are in a separate folder for clear authorship/attribution
-│       ├── cls_fe_dct_bases.py    
-│       ├── cls_fe_dft.py
-│       ├── __init__.py
-│       └── nn_proc.py
+│   └── misc.py               # cosmetics, loading/saving model files, logging
 ├── utils
 │   ├── gen_synth_data.py    # generates file dataset of synthetic data
 |   ├── lr_finder.py         # learning rate finder app (reproduces work by Fast.AI)
