@@ -153,3 +153,7 @@ Advisories re. options:
 1. Memory: If you're not generating 'on the fly,' then this thing is a 'memory hog' in the sense that it loads the whole dataset at the beginning -- this is done for the sake of *speed*, because in my experience disk I/O slows things down more than I find acceptable, and my machines have ample RAM (either 64 GB or 128 GB).
 
 2. Mixed Precision (MP): As we note in the paper, the use of MP does not increase the error noticeably *even though* we're generating audio as raw floats. This may be because it's swamped by other error. 
+
+3. What about parallelism?  In my experience, on my machines, running 'data parallel' on multiple GPUs only produces a small speedup (i.e. not worth it, better to run multiple triviall-parallel jobs learning different things). 
+
+4. Transfer learning? Yea, work in progress.  In theory a lot of the represenation/weights can carry over from one effect to the next, I just haven't written the code to copy the weights appropriately. 
