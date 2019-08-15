@@ -148,4 +148,8 @@ Advisories re. options:
     └── model_graph.svg      # model graph, shown on web web demo page
 ```
 
+**Other remarks:** 
 
+1. Memory: If you're not generating 'on the fly, then this thing is a 'memory hog' in the sense that it loads the whole dataset at the beginning -- this is done for the sake of speed, because in my experience disk I/O slows things down more than I care to, and my machines have either 64 GB or 128 GB of RAM.
+
+2. Mixed Precision (MP): As we note in the paper, the use of MP does not increase the error noticeably *even though* we're generating audio as raw floats. This may be because it's swamped by other error. 
