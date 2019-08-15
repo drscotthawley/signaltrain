@@ -15,6 +15,8 @@ Code Authors: Scott Hawley, Stylianos Mimilakis, with some code by Ben Colburn
 
 Paper preprint at [https://arxiv.org/abs/1905.11928](https://arxiv.org/abs/1905.11928), slightly revised (& slightly shorter) version accepted as a "full paper" for [AES 147](http://www.aes.org/events/147/). Paper authors are Scott H. Hawley, Benjamin Colburn, and Stylianos I. Mimilakis.
 
+Other demo options: [Jupyter Notebook](https://github.com/drscotthawley/signaltrain/blob/master/demo/SliderDemo.ipynb), [Colab Notebook](https://colab.research.google.com/drive/1ZIij0CqfISDrgb3XclMrU-OILFDpQEJ0) (but the Colab runs very slow slow) 
+
 *Disclaimer: This is a 'research' code as apposed to a general utility package. Currently the level of this release is one of "openness" for reproducibility. It is not yet on the level of a fully-maintained package.  But feel free to send Issues & PR's and I'll try to accomodate them!*
 
 ### Main Requirements:
