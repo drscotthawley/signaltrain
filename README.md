@@ -13,7 +13,7 @@ Code Authors: Scott Hawley, Stylianos Mimilakis, with some code by Ben Colburn
 
 **Demo Page:** [http://www.signaltrain.ml](http://www.signaltrain.ml)
 
-Paper preprint at [https://arxiv.org/abs/1905.11928](https://arxiv.org/abs/1905.11928), slightly revised (& slightly shorter) version accepted as a "full paper" for [AES 147](http://www.aes.org/events/147/). Paper authors are Scott H. Hawley, Benjamin Colburn, and Stylianos I. Mimilakis.
+Paper preprint at [https://arxiv.org/abs/1905.11928](https://arxiv.org/abs/1905.11928), slightly revised (& slightly shorter) [version accepted as a "full paper"](http://hedges.belmont.edu/~shawley/signaltrain_paper_aes.pdf) for [AES 147](http://www.aes.org/events/147/). Paper authors are Scott H. Hawley, Benjamin Colburn, and Stylianos I. Mimilakis.
 
 Other demo options: [Jupyter Notebook](https://github.com/drscotthawley/signaltrain/blob/master/demo/SliderDemo.ipynb), [Colab Notebook](https://colab.research.google.com/drive/1ZIij0CqfISDrgb3XclMrU-OILFDpQEJ0) (but the Colab runs very slow slow) 
 
