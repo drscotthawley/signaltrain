@@ -9,13 +9,13 @@
 # SignalTrain
 Learning time-dependent nonlinear audio effects with neural networks
 
-Authors: Scott Hawley, Stylianos Mimilakis, with some code by Ben Colburn
+Code Authors: Scott Hawley, Stylianos Mimilakis, with some code by Ben Colburn
 
 **Demo Page:** [http://www.signaltrain.ml](http://www.signaltrain.ml)
 
-Paper preprint at [https://arxiv.org/abs/1905.11928](https://arxiv.org/abs/1905.11928), slightly revised (& slightly shorter) version accepted as a "full paper" for [AES 147](http://www.aes.org/events/147/).
+Paper preprint at [https://arxiv.org/abs/1905.11928](https://arxiv.org/abs/1905.11928), slightly revised (& slightly shorter) version accepted as a "full paper" for [AES 147](http://www.aes.org/events/147/). Paper authors are Scott H. Hawley, Benjamin Colburn, and Stylianos I. Mimilakis.
 
-*Disclaimer: This is a 'research' code as apposed to a general utility package. Currently the level of this release is one of "openness" for reproducibility. It is not yet on the level of a fully-maintained package.*
+*Disclaimer: This is a 'research' code as apposed to a general utility package. Currently the level of this release is one of "openness" for reproducibility. It is not yet on the level of a fully-maintained package.  But feel free to send Issues & PR's and I'll try to accomodate them!*
 
 ### Main Requirements:
 
@@ -83,7 +83,7 @@ To incorporate (or add) other audio files (e.g. music) to this, specify `--inpat
 
 #### Pre-existing datasets
 
-[SignalTrain LA2A Dataset](https://zenodo.org/record/3348083) (21.0 GB) ![doi_image](https://zenodo.org/badge/DOI/10.5281/zenodo.3348083.svg) 
+[SignalTrain LA2A Dataset](https://zenodo.org/record/3348083) (21.0 GB) ![doi_image](https://zenodo.org/badge/DOI/10.5281/zenodo.3348083.svg) by Benjamin Colburn & Scott H. Hawley
 
 
 ### Training
