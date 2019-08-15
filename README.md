@@ -148,12 +148,14 @@ Advisories re. options:
     └── model_graph.svg      # model graph, shown on web web demo page
 ```
 
-**Other remarks:** 
+**Other remarks / Opportunities for Pull Requests!:** 
 
-1. Memory: If you're not generating 'on the fly,' then this thing is a 'memory hog' in the sense that it loads the whole dataset at the beginning -- this is done for the sake of *speed*, because in my experience disk I/O slows things down more than I find acceptable, and my machines have ample RAM (either [64 GB](https://pcpartpicker.com/user/drscotthawley/saved/bbw8dC) or [128 GB](https://pcpartpicker.com/b/j7J8TW)).
+1. Transfer learning? Yea, work in progress.  In theory a lot of the represenation/weights can carry over from one effect to the next, I just haven't written the code to copy the weights appropriately. If you want to add this, I'll take a PR! :-) 
 
-2. Mixed Precision (MP): As we note in the paper, the use of MP does not increase the error noticeably *even though* we're generating audio as raw floats. This may be because it's swamped by other error. 
+2. Memory: If you're not generating 'on the fly,' then this thing is a 'memory hog' in the sense that it loads the whole dataset at the beginning -- this is done for the sake of *speed*, because in my experience disk I/O slows things down more than I find acceptable, and my machines have ample RAM (either [64 GB](https://pcpartpicker.com/user/drscotthawley/saved/bbw8dC) or [128 GB](https://pcpartpicker.com/b/j7J8TW)).  If you have a 'fast' way of reducing memory load, feel free to send a PR! 
 
-3. What about parallelism?  In my experience, on my machines, running 'data parallel' on multiple GPUs only produces a small speedup (i.e. not worth it, better to run multiple triviall-parallel jobs learning different things). 
+3. Mixed Precision (MP): As we note in the paper, the use of MP does not increase the error noticeably *even though* we're generating audio as raw floats. This may be because it's swamped by other error. 
 
-4. Transfer learning? Yea, work in progress.  In theory a lot of the represenation/weights can carry over from one effect to the next, I just haven't written the code to copy the weights appropriately. 
+4. What about parallelism?  In my experience, on my machines, running 'data parallel' on multiple GPUs only produces a small speedup (i.e. not worth it, better to run multiple triviall-parallel jobs learning different things). 
+
+
