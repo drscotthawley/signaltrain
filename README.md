@@ -13,11 +13,12 @@ Code Authors: Scott Hawley, Stylianos Mimilakis, with some code by Ben Colburn
 
 **Demo Page:** [http://www.signaltrain.ml](http://www.signaltrain.ml)
 
+Other demo options: [Jupyter Notebook](https://github.com/drscotthawley/signaltrain/blob/master/demo/SliderDemo.ipynb), [Colab Notebook](https://colab.research.google.com/drive/1ZIij0CqfISDrgb3XclMrU-OILFDpQEJ0) (but the Colab runs very slow slow) 
+
 Paper preprint at [https://arxiv.org/abs/1905.11928](https://arxiv.org/abs/1905.11928), slightly revised (& slightly shorter) [version accepted as a "full paper"](http://hedges.belmont.edu/~shawley/signaltrain_paper_aes.pdf) for [AES 147](http://www.aes.org/events/147/). Paper authors are Scott H. Hawley, Benjamin Colburn, and Stylianos I. Mimilakis. Title is "Profiling Audio Compressors with Deep Neural Networks".
 
 **Clarification:** As we say in the paper, the code is written in pursuit of the goal of learning *general* audio effects, not just compressors. If you only want to do compressors, our method is 'overkill'.  But for the paper, we focused on compressors because they're both "hard" and "of practical interest". Further demonstrations of other effects are in progress. 
 
-Other demo options: [Jupyter Notebook](https://github.com/drscotthawley/signaltrain/blob/master/demo/SliderDemo.ipynb), [Colab Notebook](https://colab.research.google.com/drive/1ZIij0CqfISDrgb3XclMrU-OILFDpQEJ0) (but the Colab runs very slow slow) 
 
 *Disclaimer: This is a 'research' code as apposed to a general utility package. Currently the level of this release is one of "openness" for reproducibility. It is not yet on the level of a fully-maintained package.  But feel free to send Issues & PR's and I'll try to accomodate them!*
 
