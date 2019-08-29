@@ -20,9 +20,9 @@ try:
     from apex import amp, optimizers
     from apex.multi_tensor_apply import multi_tensor_applier
     have_apex = True
+    print(" Good news!  Found APEX.")
 except ImportError:
-    print("Recommend that you install apex from https://www.github.com/nvidia/apex to run this code.")
-
+    print("**** WARNING: Recommend that you install APEX from https://www.github.com/nvidia/apex to run this code.")
 
 
 def eval_status_save(model, effect, epoch, epochs, lr, mom, device, dataloader_val, logfilename, first_time,
@@ -246,9 +246,11 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
     #     the optional override arguments, for convenient interoperation with argparse.
     if have_apex:
         model, optimizer = amp.initialize(model, optimizer, opt_level=apex_opt)
+    else:
+        print("*** WARNING: No APEX available.")
 
     # Copy model to (other) GPU if possbible
-    parallel = False # torch.cuda.device_count() > 1
+    parallel = False # SHH had trouble so am turning parallelism off.  #  torch.cuda.device_count() > 1
     if parallel:       # For Hawley's 2 Titan X GPUs this typically cuts execution time down by ~30% (not 50%)
         print("Replicating NN model for data-parallel execution across", torch.cuda.device_count(), "GPUs")
         model = nn.DataParallel(model)
