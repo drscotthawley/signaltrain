@@ -9,13 +9,18 @@
 # SignalTrain
 Learning time-dependent nonlinear audio effects with neural networks
 
-Authors: Scott Hawley, Stylianos Mimilakis, with some code by Ben Colburn
+Code Authors: Scott Hawley, Stylianos Mimilakis, with some code by Ben Colburn
 
 **Demo Page:** [http://www.signaltrain.ml](http://www.signaltrain.ml)
 
-Paper preprint at [https://arxiv.org/abs/1905.11928](https://arxiv.org/abs/1905.11928), slightly revised (& slightly shorter) version accepted as a "full paper" for [AES 147](http://www.aes.org/events/147/).
+Other demo options: [Jupyter Notebook](https://github.com/drscotthawley/signaltrain/blob/master/demo/SliderDemo.ipynb), [Colab Notebook](https://colab.research.google.com/drive/1ZIij0CqfISDrgb3XclMrU-OILFDpQEJ0) (but the Colab runs very slow slow) 
 
-*Disclaimer: This is a 'research' code as apposed to a general utility package. Currently the level of this release is one of "openness" for reproducibility. It is not yet on the level of a fully-maintained package.*
+Paper preprint at [https://arxiv.org/abs/1905.11928](https://arxiv.org/abs/1905.11928), slightly revised (& slightly shorter) [version accepted as a "full paper"](http://hedges.belmont.edu/~shawley/signaltrain_paper_aes.pdf) for [AES 147](http://www.aes.org/events/147/). Paper authors are Scott H. Hawley, Benjamin Colburn, and Stylianos I. Mimilakis. Title is "Profiling Audio Compressors with Deep Neural Networks".
+
+**Clarification:** As we say in the paper, the code is written in pursuit of the goal of learning *general* audio effects, not just compressors. If you only want to do compressors, our method is 'overkill'.  But for the paper, we focused on compressors because they're both "hard" and "of practical interest". Further demonstrations of other effects are in progress. 
+
+
+*Disclaimer: This is a 'research' code as apposed to a general utility package. Currently the level of this release is one of "openness" for reproducibility. It is not yet on the level of a fully-maintained package.  But feel free to send Issues & PR's and I'll try to accomodate them!*
 
 ### Main Requirements:
 
@@ -83,7 +88,7 @@ To incorporate (or add) other audio files (e.g. music) to this, specify `--inpat
 
 #### Pre-existing datasets
 
-[SignalTrain LA2A Dataset](https://zenodo.org/record/3348083) (21.0 GB) ![doi_image](https://zenodo.org/badge/DOI/10.5281/zenodo.3348083.svg) 
+[SignalTrain LA2A Dataset](https://zenodo.org/record/3348083) (21.0 GB) ![doi_image](https://zenodo.org/badge/DOI/10.5281/zenodo.3348083.svg) by Benjamin Colburn & Scott H. Hawley
 
 
 ### Training
@@ -142,5 +147,15 @@ Advisories re. options:
     ├── model_comp4c_4k.tar  # model checkpoint used for web-based demo app
     └── model_graph.svg      # model graph, shown on web web demo page
 ```
+
+**Other remarks / Opportunities for Pull Requests!:** 
+
+1. Transfer learning? Yea, work in progress.  In theory a lot of the represenation/weights can carry over from one effect to the next, I just haven't written the code to copy the weights appropriately. If you want to add this, I'll take a PR! :-) 
+
+2. Memory: If you're not generating 'on the fly,' then this thing is a 'memory hog' in the sense that it loads the whole dataset at the beginning -- this is done for the sake of *speed*, because in my experience disk I/O slows things down more than I find acceptable, and my machines have ample RAM (either [64 GB](https://pcpartpicker.com/user/drscotthawley/saved/bbw8dC) or [128 GB](https://pcpartpicker.com/b/j7J8TW)).  If you have a 'fast' way of reducing memory load, feel free to send a PR! 
+
+3. Mixed Precision (MP): As we note in the paper, the use of MP does not increase the error noticeably *even though* we're generating audio as raw floats. This may be because it's swamped by other error. 
+
+4. What about parallelism?  In my experience, on my machines, running 'data parallel' on multiple GPUs only produces a small speedup (i.e. not worth it, better to run multiple triviall-parallel jobs learning different things). 
 
 
