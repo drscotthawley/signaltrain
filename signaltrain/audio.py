@@ -217,12 +217,13 @@ def read_audio_file(filename, sr=44100, mono=True, norm=False, device='cpu', dty
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("error")    # scipy throws warnings which should be errors
         try:
-            out_sr, signal = wavfile.read(filename)
+            read_sr, signal = wavfile.read(filename)
             scipy_ok = True
         except wavfile.WavFileWarning:
             if warn:
                 print("read_audio_file: Warning raised by scipy. ",end="")
 
+    might_want_overwrite = False
     if scipy_ok:
         if mono and (len(signal.shape) > 1):     # convert to mono
             signal = signal[:,0]
@@ -230,17 +231,19 @@ def read_audio_file(filename, sr=44100, mono=True, norm=False, device='cpu', dty
         if isinstance(signal[0], np.int16):      # convert from ints to floats if necessary
             signal = np.array(signal/32767.0, dtype=dtype)   # change from [-32767..32767] to [-1..1]
 
-        if out_sr != int(sr):
-            print(f"read_audio_file: Got sample rate of {rate} Hz instead of {sr} Hz requested. Resampling.")
-            signal = librosa.resample(signal, rate*1.0, sr*1.0, res_type='kaiser_fast')
-
+        if read_sr != int(sr):
+            print(f"read_audio_file: Got sample rate of {read_sr} Hz instead of {sr} Hz requested. Resampling.")
+            signal = librosa.resample(signal, read_sr*1.0, sr*1.0, res_type='kaiser_fast')
+            might_want_overwrite = True
     else:                                         # try librosa; it's slower but general
         if warn:
             print("Trying librosa.")
-        signal, out_sr = librosa.core.load(filename, mono=mono, sr=sr, res_type='kaiser_fast')
-        if fix_and_overwrite:           # so that we don't have to do this again
-            print(f"    Overwriting {filename} (so we don't have to use librosa again)")
-            write_audio_file(filename, signal, out_sr)
+        signal, read_sr = librosa.core.load(filename, mono=mono, sr=sr, res_type='kaiser_fast')
+        might_want_overwrite = True
+
+    if fix_and_overwrite and might_want_overwrite:
+        print(f"    Overwriting {filename} (so we don't have to use process as much again)")
+        write_audio_file(filename, signal, sr)
 
     if signal.dtype != dtype:
         signal = signal.astype(dtype, copy=False)
@@ -249,7 +252,7 @@ def read_audio_file(filename, sr=44100, mono=True, norm=False, device='cpu', dty
         absmax = np.max(np.abs(signal))
         signal = signal/absmax if absmax > 0 else signal
 
-    return signal, out_sr
+    return signal, sr
 
 
 def write_audio_file(filename, data, sr=44100):
