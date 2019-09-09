@@ -7,7 +7,10 @@ __copyright__ = 'MacSeNet'
 import torch
 import numpy as np
 import torch.nn as nn
-from .cls_fe_dft import Analysis, Synthesis
+try:   # because I can't manage to write relative imports that work both intra-package and inter-package
+    from . cls_fe_dft import Analysis, Synthesis
+except ImportError:
+    from cls_fe_dft import Analysis, Synthesis
 torch.backends.cudnn.benchmark = True   # makes Turing GPU ops faster! https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936/3
 
 
@@ -71,22 +74,37 @@ class AsymAutoEncoder(nn.Module):
             if self.use_bias:
                 x.bias.data.zero_()
 
-    def forward(self, x_input, knobs, skip_connections='res'):
+    def forward(self, x_input, knobs, skip_connections='res', return_acts=False):
+        acts = []                                          # list of activations
         x_input = x_input.transpose(2, 1)
         z = self.relu(self.fnn_enc(x_input))
+        if return_acts: acts.append(z)
         z = self.dropout(z) if self.use_dropout else z
         z = self.relu(self.fnn_enc2(z))
+        if return_acts: acts.append(z)
         z = self.dropout(z) if self.use_dropout else z
         z = self.relu(self.fnn_enc3(z))
+        if return_acts: acts.append(z)
         z = self.relu(self.fnn_enc4(z))
+        if return_acts: acts.append(z)
+
 
         knobs_r = knobs.unsqueeze(1).repeat(1, z.size()[1], 1)  # repeat the knobs to make dimensions match
         catted = torch.cat((z,knobs_r),2)
+        if return_acts: acts.append(catted)
+
         z = self.relu( self.fnn_addknobs( catted ) )
+        if return_acts: acts.append(z)
+
         z = self.relu( self.fnn_dec4(z))
+        if return_acts: acts.append(z)
+
         z = self.relu( self.fnn_dec3(z))
+        if return_acts: acts.append(z)
+
         z = self.dropout(z) if self.use_dropout else z
         z = self.relu( self.fnn_dec2(z))
+        if return_acts: acts.append(z)
 
         if skip_connections == 'exp':           # Refering to an old AES paper for exponentiation
             z_a = torch.log(self.relu(self.fnn_dec(z)) + 1e-6) * torch.log(x_input[:,-self._OT:,:] + 1e-6)
@@ -98,10 +116,19 @@ class AsymAutoEncoder(nn.Module):
         else:
             out = self.relu(self.fnn_dec(z))
         out = self.dropout(out) if self.use_dropout else out
+        if return_acts: acts.append(out)
 
         result = out.transpose(2, 1)
-        return result
 
+        if return_acts:
+            return result, acts
+        else:
+            return result
+
+
+
+'''
+# currently CNN version is unused because it's slow
 
 class cnnblock(nn.Module):
     def __init__(self, bn_size=1):
@@ -125,6 +152,7 @@ class cnntransblock(nn.Module):
         )
     def forward(self, input):
         return self.myblock(input)
+
 
 
 class AsymCNNAutoEncoder(nn.Module):
@@ -179,7 +207,7 @@ class AsymCNNAutoEncoder(nn.Module):
             if self.use_bias:
                 x.bias.data.zero_()
 
-    def forward(self, x_input, knobs, skip_connections='res', log=False):
+    def forward(self, x_input, knobs, skip_connections='res', log=False, return_acts=False):
         x_input = x_input.transpose(2, 1)  # flip frequency & time (so we operate on time)
 
         # encoder
@@ -230,9 +258,7 @@ class AsymCNNAutoEncoder(nn.Module):
 
         result = out.transpose(2, 1)
         return result
-
-
-
+'''
 
 
 class AsymMPAEC(nn.Module):
@@ -240,8 +266,17 @@ class AsymMPAEC(nn.Module):
         Asymmetric Magnitude-Phase AutoEncoder (with Knobs)
         'asymmetric' because output size != input size
         See st_model() below for generic calling
+
+        Inputs:
+           expected_time_frames:     Intended number of STFT time frames on input side
+           output_tf:                Intended number of STFT time frames on output side
+           n_knobs:                  Number of knobs to concatenate in the middle of the model
+           ft_size:                  size of Fourier transform in STFT
+           hop_size:                 hop size between STFT frames
+           decomposition_rank:       size of first-smaller layer in autoencoder (we added more as we wrote this)
     """
-    def __init__(self, expected_time_frames, ft_size=1024, hop_size=384, decomposition_rank=64, n_knobs=3, output_tf=None):
+    def __init__(self, expected_time_frames, ft_size=1024, hop_size=384,
+        decomposition_rank=64, n_knobs=4, output_tf=None):
         super(AsymMPAEC, self).__init__()
 
         print("AsymMPAEC: expected_time_frames, ft_size, hop_size, decomposition_rank, n_knobs, output_tf = ", expected_time_frames, ft_size, hop_size, decomposition_rank, n_knobs, output_tf)
@@ -256,6 +291,7 @@ class AsymMPAEC(nn.Module):
         self.phs_aenc = AsymAutoEncoder(T=expected_time_frames, R=decomposition_rank, K=n_knobs, OT=self.output_tf)
         #self.valve = nn.Parameter(torch.tensor([0.2,1.0]), requires_grad=True)  # "wet-dry mix"
 
+
     def reinitialize(self):  # randomly reassigns weights
         self.aenc.initialize()
         self.phs_aenc.initialize()
@@ -266,17 +302,22 @@ class AsymMPAEC(nn.Module):
                                       max_norm=1., norm_type=1)
 
 
-    def forward(self, x_cuda, knobs_cuda):
+    def forward(self, x_cuda, knobs_cuda, return_acts=False):
         # trainable STFT, outputs spectrograms for real & imag parts
         x_real, x_imag = self.dft_analysis.forward(x_cuda/2)  # the /2 is cheap way to help us approach 'unit variaance' of -0.5 and .5
         # Magnitude-Phase computation
         mag = torch.norm(torch.cat((x_real.unsqueeze(0), x_imag.unsqueeze(0)), 0), 2, dim=0)
         phs = torch.atan2(x_imag.float(), x_real.float()+1e-7).to(x_cuda.dtype)
-        #print(f"  forward: mag.size = {mag.size()}")
+        if return_acts:
+            layer_acts = [x_real, x_imag, mag, phs]
 
         # Processes Magnitude and phase individually
-        mag_hat = self.aenc.forward(mag, knobs_cuda, skip_connections='sf')
-        phs_hat = self.phs_aenc.forward(phs, knobs_cuda, skip_connections='')
+        mag_hat, m_acts = self.aenc.forward(mag, knobs_cuda, skip_connections='sf', return_acts=return_acts)
+        phs_hat, p_acts = self.phs_aenc.forward(phs, knobs_cuda, skip_connections='', return_acts=return_acts)
+        if return_acts:
+            layer_acts.extend(m_acts)
+            layer_acts.extend(p_acts)
+
         output_phs_dim = phs_hat.size()[1]
         phs_hat = phs_hat + phs[:,-output_phs_dim:,:] # <-- residual skip connection. Slightly smoother convergence
 
@@ -285,12 +326,18 @@ class AsymMPAEC(nn.Module):
         an_imag = mag_hat * torch.sin(phs_hat)
 
         # Forward synthesis pass
-        x_hat = self.dft_synthesis.forward(an_real, an_imag)
+        x_fwdsyn = self.dft_synthesis.forward(an_real, an_imag)
 
         # final skip residual
-        x_hat = x_hat  + x_cuda[:,-x_hat.size()[-1]:]/2
+        y_hat = x_fwdsyn  + x_cuda[:,-x_fwdsyn.size()[-1]:]/2
 
-        return 2*x_hat, 2*mag, 2*mag_hat   # undo the /2 at the beginning
+        if return_acts:
+            layer_acts.extend([mag_hat, phs_hat, an_real, an_imag, x_fwdsyn, y_hat])
+
+        if return_acts:
+            return 2*y_hat, mag, mag_hat, layer_acts   # undo the /2 at the beginning
+        else:
+            return 2*y_hat, mag, mag_hat
 
 
 
@@ -342,8 +389,8 @@ class st_model(nn.Module):
     def clip_grad_norm_(self):
         self.mpaec.clip_grad_norm_()
 
-    def forward(self, x_cuda, knobs_cuda):
-        return self.mpaec.forward(x_cuda, knobs_cuda)
+    def forward(self, x_cuda, knobs_cuda, return_acts=False):
+        return self.mpaec.forward(x_cuda, knobs_cuda, return_acts=return_acts)
 
     '''# not quite ready for this.
     def freeze(self):
