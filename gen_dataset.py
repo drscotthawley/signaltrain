@@ -170,11 +170,13 @@ def gen_synth_data(args):
         effect = st.audio.Comp_Just_Thresh()
     elif 'comp_4c_large' == args.effect:
         effect = st.audio.Compressor_4c_Large()
+    elif 'comp_one' == args.effect:
+        effect = st.audio.Compressor_4c_OneSetting()
     else:
         print("Sorry, not set up to work for other effects")
         sys.exit(1)
     effect.info()
-    
+
     train_val_split = 0.8  # between 0 and 1, below number will be train, rest will be val 0.8 means 80-20 split
     if settings_per is not None:  # evenly cover knob values in Train
         num_train_files = int( settings_per**len(effect.knob_ranges) ) # Evenly spaces settings
