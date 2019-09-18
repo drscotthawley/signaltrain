@@ -68,7 +68,7 @@ class AudioFileDataSet(Dataset):
     """
     def __init__(self, chunk_size, effect, sr=44100, path="./Train/", datapoints=8000, \
         dtype=np.float32, preload=True, rerun=False, y_size=None, augment=True,
-        align_end=True, view_of=None):
+        align_end=True, view_of=None, compand=False):
         """
         view_of: as a memory-saving experiment, pass another dataset.
         """
@@ -83,6 +83,7 @@ class AudioFileDataSet(Dataset):
         self.preload = preload
         self.align_end = align_end # found that some of our audio files have starting points that are not aligned, but their einding points are.
         self.rerun_effect = rerun  # a hack to avoid causality issues at chunk boundaries
+        self.compand = compand
         if y_size is None:
             self.y_size = chunk_size
         else:
@@ -213,6 +214,10 @@ class AudioFileDataSet(Dataset):
                 audio.write_audio_file('audio_targ_'+str(idx)+'.wav', audio_targ, sr=44100)
                 audio.write_audio_file('audio_diff_'+str(idx)+'.wav', audio_diff, sr=44100)
             '''
+
+        if self.compand:
+            audio_in = audio.mu_compand(audio_in)
+            audio_targ = audio.mu_compand(audio_targ)
 
         return audio_in, audio_targ, knobs_wc
 

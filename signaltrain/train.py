@@ -43,7 +43,7 @@ def eval_status_save(model, effect, epoch, epochs, lr, mom, device, dataloader_v
         x_val_cuda, y_val_cuda, knobs_val_cuda = x_val.to(device), y_val.to(device), knobs_val.to(device)
 
         y_val_hat, mag_val, mag_val_hat = model.forward(x_val_cuda, knobs_val_cuda)
-        loss_val = loss_functions.calc_loss(y_val_hat.float(), y_val_cuda.float(), mag_val_hat.float(),
+        loss_val = loss_functions.calc_loss_old(y_val_hat.float(), y_val_cuda.float(), mag_val_hat.float(),
             scale_by_freq=scale_by_freq)#, l1_lambda=lr/1000 )
         vl_avg = beta*vl_avg + (1-beta)*loss_val.item()    # (running) average val loss
         if 0 == val_batch_num % status_every:
@@ -112,12 +112,12 @@ def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, m
             y_hat, mag, mag_hat = model.forward(x_cuda, knobs_cuda) # feed-forward synthesis
 
             # set up loss weighting
-            #if scale_by_freq is None:
-            #    expfac = 7./mag_hat.size()[-1]   # exponential L1 loss scaling by ~1000 times (30dB) over freq range
-            #    scale_by_freq = torch.exp(expfac* torch.arange(0., mag_hat.size()[-1])).expand_as(mag_hat).float()
+            if scale_by_freq is None:
+                expfac = 7./mag_hat.size()[-1]   # exponential L1 loss scaling by ~1000 times (30dB) over freq range
+                scale_by_freq = torch.exp(expfac* torch.arange(0., mag_hat.size()[-1])).expand_as(mag_hat).float()
 
             # loss evaluation
-            loss = loss_functions.calc_loss(y_hat.float(), y_cuda.float(),
+            loss = loss_functions.calc_loss_old(y_hat.float(), y_cuda.float(),
                 mag_hat.float(), scale_by_freq=scale_by_freq)#, l1_lambda=lr/1000)
 
             # Status message
@@ -167,7 +167,7 @@ def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, m
 def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_size=20,
     device=torch.device("cuda:0"), plot_every=10, cp_every=25, sr=44100, datapath=None,
     scale_factor=1, shrink_factor=4, apex_opt="O0", target_type="stream", lr_max=1e-4,
-    in_checkpointname = 'modelcheckpoint.tar'):
+    in_checkpointname = 'modelcheckpoint.tar', compand=False):
     """
     Main training routine for signaltrain
 
@@ -186,6 +186,7 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
         target_type:      "chunk" (re-run the effect for each chunk) or "stream" (apply effect to whole audio stream)
         lr_max:           maximum learning rate
         in_checkpointname:   filename of previous checkpoint to load from (if it exists)
+        compand:          whether to compand / decompand the audio
     """
 
     # print info about this training run
@@ -231,11 +232,17 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
     # Setup/load data
     synth_data = datapath is None # Are we synthesizing data or do we expect it to come from files
     if synth_data:  # synthesize input & target data
-        dataset = datasets.SynthAudioDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points, y_size=out_chunk_size, augment=True)
-        dataset_val = datasets.SynthAudioDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4, recycle=True, y_size=out_chunk_size, augment=False)
-    else:           # use prerecoded files for input & target data
-        dataset = datasets.AudioFileDataSet(chunk_size, effect, sr=sr,  datapoints=n_data_points, path=datapath+"/Train/",  y_size=out_chunk_size, rerun=(target_type!="stream"), augment=True, preload=True)
-        dataset_val = datasets.AudioFileDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4, path=datapath+"/Val/", y_size=out_chunk_size, rerun=(target_type!="stream"), augment=False)
+        dataset = datasets.SynthAudioDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points,
+            y_size=out_chunk_size, augment=True)
+        dataset_val = datasets.SynthAudioDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4,
+            recycle=True, y_size=out_chunk_size, augment=False)
+    else:           # use prerecorded files for input & target data
+        dataset = datasets.AudioFileDataSet(chunk_size, effect, sr=sr,  datapoints=n_data_points,
+            path=datapath+"/Train/",  y_size=out_chunk_size, rerun=(target_type!="stream"), augment=True,
+            preload=True, compand=compand)
+        dataset_val = datasets.AudioFileDataSet(chunk_size, effect, sr=sr, datapoints=n_data_points//4,
+            path=datapath+"/Val/", y_size=out_chunk_size, rerun=(target_type!="stream"), augment=False,
+            compand=compand)
 
     dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=10, shuffle=True, worker_init_fn=datasets.worker_init) # need worker_init for more variance
     dataloader_val = DataLoader(dataset_val, batch_size=batch_size, num_workers=10, shuffle=False)

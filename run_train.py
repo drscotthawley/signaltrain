@@ -34,6 +34,7 @@ if __name__ == "__main__":
     parser.add_argument('--apex', help="optimization setting to use with NVIDIA apex", default="O0")
     parser.add_argument('-b', '--batch', type=int, help="batch size", default=200)
     parser.add_argument('--checkpoint', help='Name of model checkpoint .tar file', default="modelcheckpoint.tar")
+    parser.add_argument('-c','--compand', help='Turn on to use companded/decompanded audio', action='store_true')
     parser.add_argument('--effect', help='Name of effect to use. ("files" = search for "target_" and effect_info.ini files in path)', default="comp_4c")
     parser.add_argument('--epochs', type=int, help='Number of epochs to run', default=1000)
     parser.add_argument('--lrmax', type=float, help="max learning rate", default=1e-4) # Note: lrmax should be obtained by running lr_finder in learningrate.py
@@ -63,6 +64,8 @@ if __name__ == "__main__":
         effect = st.audio.Comp_Just_Thresh()
     elif e == 'comp_large':
         effect = st.audio.Compressor_4c_Large()
+    elif e == 'comp_one':
+        effect = st.audio.Compressor_4c_OneSetting()
     elif e == 'denoise':
         effect = st.audio.Denoise()
     elif e == 'lowpass':
@@ -96,7 +99,8 @@ if __name__ == "__main__":
     # call the trianing routine
     model = st.train.train(epochs=args.epochs, n_data_points=args.num, batch_size=args.batch, device=device, sr=args.sr,\
         effect=effect, datapath=args.path, scale_factor=args.scale, shrink_factor=args.shrink,
-        apex_opt=args.apex, target_type=args.target, lr_max=args.lrmax, in_checkpointname=args.checkpoint)
+        apex_opt=args.apex, target_type=args.target, lr_max=args.lrmax, in_checkpointname=args.checkpoint,
+        compand=args.compand)
 
     print("run_train.py: Execution completed.")
 # EOF

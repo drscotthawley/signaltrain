@@ -27,13 +27,18 @@ except ImportError:
     print("Recommend that you install apex from https://www.github.com/nvidia/apex to run this code.")
 
 
-def predict_long(signal, knobs_nn, model, chunk_size, out_chunk_size, sr=44100, effect=None, device="cpu:0"):
+def predict_long(signal, knobs_nn, model, chunk_size, out_chunk_size, sr=44100, effect=None, device="cpu:0", compand=False):
 
     # reshape input and knobs.  break signal up into overlapping windows
     overlap = chunk_size-out_chunk_size
     print("predict_long: chunk_size, out_chunk_size, overlap = ",chunk_size, out_chunk_size, overlap)
     x = st.audio.sliding_window(signal, chunk_size, overlap=overlap)
     print("predict_long: x.shape, signal.shape = ",x.shape, signal.shape )
+
+    if compand:
+        print("Companding input")
+        x = st.audio.mu_compand(x)
+
     batch_size = x.shape[0]
     if x.shape[0] > 200:
         print(f"**WARNING: effective batch size = {x.shape[0]}, may be too large and produce CUDA out of memory errors")
@@ -112,8 +117,9 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('checkpoint', help='Name of model checkpoint .tar file')
     parser.add_argument('audiofile', help='Name of audio file to read')
-    parser.add_argument('--effect', help='Name of effect class for generating target', default='comp_4c')
-    parser.add_argument('--knobs', help='String of knob/control settings', default='-30.0, 5.0, 0.04, 0.04')
+    parser.add_argument('-e','--effect', help='Name of effect class for generating target', default='')
+    parser.add_argument('--knobs', help='String of knob/control settings', default='')
+    parser.add_argument('-c','--compand', help='Turn on to use companded/decompanded audio', action='store_true')
     # info is in checkpoint file  parser.add_argument('--path', help='Path from which to load file-based effects', default='')
     args = parser.parse_args()
     print("args =",args)
@@ -151,15 +157,21 @@ if __name__ == "__main__":
     print("signal.shape = ",signal.shape)
     y_ct = None
 
-    ##### KNOB SETTINGS HERE
-    # Can hard code them here or, for 'files' effects, they're inferred from the target (below)
-    #knobs_wc = np.array([-30, 2.5, .002, .03])  # 4-knob compressor settings, for Windy Places in demo
-    #knobs_wc = np.array([-20, 5, .01, .04])  # 4-knob compressor settings, for Leadfoot in demo
-    #knobs_wc = np.array([-40])  # comp with only 1 knob 'thresh'
-    #knobs_wc = np.array([1,85])
-    #knobs_wc = np.array([-30.0, 5.0, 0.04, 0.04])
-    knobs_wc = np.fromstring(args.knobs, dtype=np.float32, sep=',')
-    print("default knobs_wc  =",knobs_wc)
+
+    # Knob settings
+    kr = np.array(knob_ranges)
+
+    if args.knobs=='':  # if not given, the set knobs to middle of their range
+        knobs_nn = np.zeros(num_knobs)
+        knobs_wc = [(knob_ranges[i,0] + knob_ranges[i,1])/2 for i in range(num_knobs)]
+    else:               # Otherwise, parse the string given in command line
+        knobs_wc = np.fromstring(args.knobs, dtype=np.float32, sep=',')
+        knobs_nn = (knobs_wc - kr[:,0])/(kr[:,1]-kr[:,0]) - 0.5
+
+    print("knobs_wc  =",knobs_wc)
+    print("knobs_nn  =",knobs_nn)
+
+    # convert to NN parameters for knobs
 
 
     # Generate Target audio  - in one big stream: "streamed target" data
@@ -170,6 +182,8 @@ if __name__ == "__main__":
             effect = st.audio.Compressor_4c()
         elif args.effect == 'comp_4c_large':
             effect = st.audio.Compressor_4c_Large()
+        elif args.effect == 'comp_one':
+            effect = st.audio.Compressor_4c_OneSetting()
         elif args.effect == 'comp_t':
             effect = st.audio.Comp_Just_Thresh()
         elif args.effect == 'files':
@@ -193,13 +207,10 @@ if __name__ == "__main__":
             y_st, _ = effect.go_wc(signal, knobs_wc)
             y_ct = calc_ct(signal, effect, knobs_wc, out_chunk_size, chunk_size)
 
-    # convert to NN parameters for knobs
-    kr = np.array(knob_ranges)
-    knobs_nn = (knobs_wc - kr[:,0])/(kr[:,1]-kr[:,0]) - 0.5
 
     # Call the predict_long routine
     print("\nCalling predict_long()...")
-    y_pred = predict_long(signal, knobs_nn, model, chunk_size, out_chunk_size, sr=sr, device=device)
+    y_pred = predict_long(signal, knobs_nn, model, chunk_size, out_chunk_size, sr=sr, device=device, compand=args.compand)
 
     print("\n...Back. Output: y_pred.shape = ",y_pred.shape)
 
@@ -208,12 +219,17 @@ if __name__ == "__main__":
         print("diff in lengths = ",len(y_st)-len(y_pred))
 
     # output files (offset pred with zeros to time-match with input & target)
-    y_out = np.zeros(len(y_st),dtype=np.float32)
+    y_out = np.zeros(len(signal),dtype=np.float32)
     y_out[-len(y_pred):] = y_pred
 
     print("Output y_out.shape = ",y_out.shape)
 
     # write output files, which have been properly aligned
+    if args.compand:
+        print("De-companding outputs")
+        signal = st.audio.mu_decompand(signal)
+        y_out = st.audio.mu_decompand(y_out)
+
     tagstr = ''
     for i in range(len(knobs_wc)):
         tagstr += '__'+str((knobs_wc[i]))

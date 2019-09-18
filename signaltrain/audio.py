@@ -336,6 +336,15 @@ def synth_input_sample(t, chooser=None, randfunc=np.random.rand, t0_fac=None):
 
 
 #---- Effects
+def mu_compand(y, mu=32):
+    return np.sign(y)*np.log(1+mu*np.abs(y))/np.log(1+mu)
+
+
+def mu_decompand(y, mu=32):
+    return np.sign(y)/mu*((1+mu)**np.abs(y) - 1)
+
+
+
 @autojit
 def compressor(x, thresh=-24, ratio=2, attackrel=0.045, sr=44100.0, dtype=np.float32):
     """
@@ -516,6 +525,15 @@ class Comp_Just_Thresh(Effect):  # compressor with just threshold
     def go_wc(self, x, knobs_w):
         return compressor_4controls(x, thresh=knobs_w[0], ratio=self.ratio, attackTime=self.attack, releaseTime=self.release, sr=self.sr), x
 
+
+class Compressor_4c_OneSetting(Effect):  # compressor with 4 controls, locked in one setting
+    def __init__(self, **kwargs):
+        super(Compressor_4c_OneSetting, self, **kwargs).__init__()
+        self.name = 'Compressor_4c_OneSetting'
+        self.knob_names = ['threshold', 'ratio', 'attackTime','releaseTime']
+        self.knob_ranges = np.array([[-25.001,-25.], [4,4.001], [5e-3,5.001e-3], [2e-2,2.001e-2]])
+    def go_wc(self, x, knobs_w):
+        return compressor_4controls(x, thresh=knobs_w[0], ratio=knobs_w[1], attackTime=knobs_w[2], releaseTime=knobs_w[3], sr=self.sr), x
 
 
 class Echo(Effect):
