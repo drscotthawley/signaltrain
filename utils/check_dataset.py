@@ -97,15 +97,16 @@ def estimate_time_shift(x, y):
     ct_samples = t_samples - nx//2  # try to center time shift (x axis) on zero
     cmax_ind = np.argmax(corr)      # where is the max of the cross-correlation?
     dt = ct_samples[cmax_ind]       # grab the time shift value corresponding to the max c-corr
-    if DEBUG: print("cmax_ind, nx//2, ny//2, dt =",cmax_ind, nx//2, ny//2, dt)
 
     if DEBUG:
+        print("cmax_ind, nx//2, ny//2, dt =",cmax_ind, nx//2, ny//2, dt)
         fig, (ax_x, ax_y, ax_corr) = plt.subplots(3, 1)
         ax_x.get_shared_x_axes().join(ax_x, ax_y)
         ax_x.plot(t_samples, x)
         ax_y.plot(t_samples, y)
         ax_corr.plot(ct_samples, corr)
         plt.show()
+        
     return dt
 
 
