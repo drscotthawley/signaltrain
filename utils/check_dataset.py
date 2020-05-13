@@ -17,13 +17,7 @@
 #    $ ./check_timing.py [options] <directory>
 #  or
 #    $ ./check_timing.py [options] <input1> <input2>... <target1> <target2>...
-#
-# (there's no option where it takes a list of files longer than 2, not 'even' an
-# even-numbered list, because I just imagined problems with file ordering from
-# '*' operators, in cases there are inputs without matching targets, etc. )
-#  Also, if you've got a TON of files, the '*' operator might give you a "List
-#  too long" error, and then the code might run strangely.)
-#
+##
 #    If <directory> is specified, it will search for an 'input' file
 #    and match it with a corresponding 'target' file with the name number, e.g.
 #    "input_47_" and "target_47_".
