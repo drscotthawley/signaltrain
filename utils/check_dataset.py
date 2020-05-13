@@ -64,6 +64,7 @@ import sys
 import os
 import glob
 import librosa
+from scipy.io import wavfile
 import shutil
 import re
 
@@ -114,12 +115,20 @@ def estimate_time_shift(x, y, sr = 44100):
     return dt
 
 
+#  for use in filtering filenames
+def is_acceptable(filename):
+    return filename.lower().endswith(('.wav', '.mp3', '.aif', '.aiff')) and \
+        (('input_' in filename) or ('target_' in filename))
+
+
+
 parser = argparse.ArgumentParser(description="Check dataset for mismatches",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('input_or_dir', help='input file 1, or directory')
 parser.add_argument('target_or_more_files', nargs='*', help='target file 1, or optional more files (for non-directory usage)')
 parser.add_argument('-a','--align', help='Fix: Align time (overwrites)', action='store_true')
 parser.add_argument('-d','--delete', help='Fix: Delete extra/unmatching input or target files (overwrites)', action='store_true')
+parser.add_argument('-f','--fast', help='Fast: skip timing checks', action='store_true')
 parser.add_argument('-l','--length', help='Fix: Make lengths the same, by truncating (overwrites)', action='store_true')
 parser.add_argument('-m','--mono', help='Fix: Force mono (overwrites)', action='store_true')
 parser.add_argument('-s','--sr', help='Fix: Enforce sample rate of first input (overwrites)', action='store_true')
@@ -127,41 +136,60 @@ parser.add_argument('--fix', help='Fix: Apply all fixes (overwrites)', action='s
 args = parser.parse_args()
 if (args.fix):
     [args.align, args.length, args.delete, args.sr, args.mono] = [True]*5
-print("args =",args)
+if DEBUG: print("args =",args)
 
 # Make sense of how the user is specifying where to check
-if args.target_or_more_files == None:
-    print("Operating on a directory")
-    assert False, "***Actually this doesn't work yet.  Use the list-of-files approach"
-    #file_list = glob.glob(args.input_or_dir+'/input*') + glob.glob(args.input_or_dir+'/target*')
-    file_list = []
+if args.target_or_more_files == []:
+    dir = args.input_or_dir
+    assert os.path.isdir(dir), f"{dir} is not a directory"
+
+    print(f"Operating on directory {dir}")
+    file_list, input_list, target_list = [], [], []
     # TODO: make sure it's actually a directory
 
-    for root, dirs, files in os.walk(args.input_or_dir):
-        # TODO: Make sure we only add "input" or "target" files and ignore others!
-        file_list.append(files)
+    for dirpath, subdirs, files in os.walk(dir):
+        for f in files:
+            if f.lower().endswith(('.wav', '.mp3', '.aif', '.aiff')):
+                if 'input' in f:
+                    input_list.append(os.path.join(dirpath, f))
+                elif 'target' in f:
+                    target_list.append(os.path.join(dirpath, f))
+            if is_acceptable(f):
+                file_list.append(os.path.join(dirpath, f))
 else:
     file_list = [args.input_or_dir] + args.target_or_more_files
     print(f"Operating on a list of {len(file_list)} files")
+    # make a list of all the inputs, and a list of all the tagets
+    input_list = list(filter(lambda x: 'input' in x, file_list))
+    target_list = list(filter(lambda x: 'target' in x, file_list))
 
-file_list.sort()
+input_list.sort()
+target_list.sort()
+
+# sanity check: as many inputs as targets?
+#   Note: one could imagine multiple targets for the same input, but we've
+#   not done that for signaltrain.
+ni, nt = len(input_list), len(target_list)
+assert ni ==  nt, f"{ni} inputs but {nt} targets"
+
+file_list = input_list + target_list
 
 # Show what we'll be checking
-print("file_list = ",file_list)
+if DEBUG: print("file_list = ",file_list)
 
-# Simple check to make sure we've got an even number of files
-n = len(file_list )
-assert n%2 == 0, f"ERROR: len(file_list) = {n}, needs to be an even number"
 
-# At this point, we should have a list consisting of
-#        [input1, input2, input3,...target1, target2, target3]
-for i in range(n//2):
+# Sanity check: make sure same file doesn't exist in multiple directories
+basenames = [os.path.basename(p) for p in file_list]   # grab all the filenames
+assert len(basenames) == len(set(basenames)), "You've got duplicates"
+
+
+print("#### SIMPLE SANITY CHECKS based on filenames. Fast")
+# Loop through files
+for i in range(ni):
     problem = False
-    input_filename, target_filename = file_list[i], file_list[i+n//2]
+    input_filename, target_filename = input_list[i], target_list[i]
     ibase, tbase = os.path.basename(input_filename), os.path.basename(target_filename)
-    print(f"input = {ibase},    target = {tbase}")
-
-    #### SIMPLE SANITY CHECKS
+    #print(f"input = {input_filename},    target = {target_filename}")
 
     # make sure the first is an input and the second is a target
     assert ('input_' in ibase) and ('target_' in tbase)
@@ -169,57 +197,80 @@ for i in range(n//2):
     # make sure the number-designation (first numbers found) of the files line up
     input_num = re.search('_[0-9]+_', ibase).group()
     target_num = re.search('_[0-9]+_', tbase).group()
-    assert input_num == target_num, f"input_num ({input_num}) != target_num = ({target_num})"
+    if input_num != target_num:
+        print(f"{colors.RED}    **PROBLEM**:{colors.RESET} For input = {input_filename},  target = {target_filename}:")
+        print(f"                 input_num ({input_num}) != target_num ({target_num})")
+        sys.exit(1)
+    # make sure they're in the same directory
+    assert os.path.dirname(input_filename) == os.path.dirname(target_filename)
 
 
-    #### CHECKING THE AUDIO
+
+print("#### CHECKING THE AUDIO.  Slower.")
+# Loop through files
+for i in range(ni):
+    problem = False
+    input_filename, target_filename = input_list[i], target_list[i]
+    ibase, tbase = os.path.basename(input_filename), os.path.basename(target_filename)
+    print(f"input = {input_filename},    target = {target_filename}")
+
+
+    repaired = False     # flag for if we want to output a fixed set of files
 
     # Read the audio files
     #  x, y = data for input, target
-    x, sr_x = librosa.core.load(input_filename, sr=None, mono=False)
-    y, sr_y = librosa.core.load(target_filename, sr=None, mono=False)
+    x, sr_x = librosa.load(input_filename, sr=None, mono=False)
+    y, sr_y = librosa.load(target_filename, sr=None, mono=False)
 
     # Check basic stuff
     if sr_x != sr_y:
         print(f"{colors.RED}    **PROBLEM**:sr_x ({sr_x}) != sr_y ({sr_y}){colors.RESET}")
-        problem = True
+        if args.sr:
+            sr_y, repaired = sr_x, True
+            print("     Fixing: setting sr_y := sr_x")
+        else:
+            problem = True
+
     if x.shape != y.shape:
         print(f"{colors.RED}    **PROBLEM**: x.shape ({x.shape}) != y.shape ({y.shape}){colors.RESET}")
         problem = True
 
-    nx = x.shape[0]
+    if args.mono:
+        x, y = x[0], y[0]
+        repaired = True
 
-    #Compute the time delay (argmax of cross-correlation) in samples
-    if DEBUG: print("    calling estimate_time_shift...")
-    short_len = nx//10       # 20-minute long audio files take a while, so use a subset
-    dt = estimate_time_shift(x[0:short_len], y[0:short_len])
-    if dt != 0:
-        print(f"{colors.RED}    **PROBLEM**: Estimated time shift of {dt} samples from input to target.{colors.RESET}")
-        problem = True
+    ### Check timing alignment.  Slow
+    if not args.fast:
+        #Compute the time delay (argmax of cross-correlation) in samples
+        if DEBUG: print("    Calling estimate_time_shift (slow)...")
+        nx = x.shape[0]
+        short_len = nx//10       # 20-minute long audio files take a while, so use a subset
+        dt = estimate_time_shift(x[0:short_len], y[0:short_len])
+        if dt != 0:
+            print(f"{colors.RED}    **PROBLEM**: Estimated time shift of {dt} samples from input to target.{colors.RESET}")
+            problem = True
+
+            if args.align:     # Fix the alignment
+                print("        Trying to fix alignment...")
+                if dt < 0:
+                    x = x[-dt:]
+                else:
+                    y = y[dt:]
+                newlen = min(x.shape[0], y.shape[0])
+                x, y = x[0:newlen], y[0:newlen]
+
+                # check to see how we did
+                dt  = estimate_time_shift(x[0:short_len], y[0:short_len])
+                print(f"        New estimated time shift = {dt} samples, x.shape = {x.shape}, y.shape = {y.shape}")
+                if dt == 0:
+                    problem, repaired = False, True
+                else:
+                    assert False, "Can't figure out what to do with this."
 
     if not problem:
         print(f" {colors.GREEN}  Looks good! :-) {colors.RESET}")
 
-#### WORK IN PROGRESS ####
-sys.exit(1)
-
-### The following was just copied from scipy.signal to show how to compute a
-#   cross-correlation
-sig = np.repeat([0., 1., 1., 0., 1., 0., 0., 1.], 128)
-sig_noise = sig + np.random.randn(len(sig))
-corr = signal.correlate(sig_noise, np.ones(128), mode='same') / 128
-
-clock = np.arange(64, len(sig), 128)
-fig, (ax_orig, ax_noise, ax_corr) = plt.subplots(3, 1, sharex=True)
-ax_orig.plot(sig)
-ax_orig.plot(clock, sig[clock], 'ro')
-ax_orig.set_title('Original signal')
-ax_noise.plot(sig_noise)
-ax_noise.set_title('Signal with noise')
-ax_corr.plot(corr)
-ax_corr.plot(clock, corr[clock], 'ro')
-ax_corr.axhline(0.5, ls=':')
-ax_corr.set_title('Cross-correlated with rectangular pulse')
-ax_orig.margins(0, 0.1)
-fig.tight_layout()
-plt.show()
+    if repaired: # save -- overwrite -- new versions of input & output
+        print("       Overwriting new version of input and target...")
+        wavfile.write(input_filename, sr_x)
+        wavfile.write(target_filename, sr_y, y)
