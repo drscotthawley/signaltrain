@@ -166,24 +166,39 @@ else:
 input_list.sort()
 target_list.sort()
 
+
+print("\n#### SIMPLE SANITY CHECKS based on filenames. Fast")
+
 # sanity check: as many inputs as targets?
 #   Note: one could imagine multiple targets for the same input, but we've
 #   not done that for signaltrain.
 ni, nt = len(input_list), len(target_list)
-assert ni ==  nt, f"{ni} inputs but {nt} targets"
 
+# TODO: make it tell us specifically what's lacking or extra
+if ni != nt:
+    print(f"{colors.RED}**PROBLEM**:{colors.RESET} {ni} inputs but {nt} targets")
+    input_nums = [re.search('_[0-9]+_', os.path.basename(i)).group() for i in input_list]
+    target_nums = [re.search('_[0-9]+_', os.path.basename(i)).group() for i in target_list]
+
+    for i in input_nums:  # TODO: slow. make this faster with pythonic list operations
+        if not (i in target_nums):
+            print(f'  {i} is in inputs but not targets')
+    for i in target_nums:
+        if not (i in input_nums):
+            print(f'  {i} is in targets but not inputs')
+    sys.exit(1)
+
+# total list of files
 file_list = input_list + target_list
 
 # Show what we'll be checking
 if DEBUG: print("file_list = ",file_list)
 
 
-# Sanity check: make sure same file doesn't exist in multiple directories
+# make sure same file doesn't exist in multiple directories
 basenames = [os.path.basename(p) for p in file_list]   # grab all the filenames
 assert len(basenames) == len(set(basenames)), "You've got duplicates"
 
-
-print("#### SIMPLE SANITY CHECKS based on filenames. Fast")
 # Loop through files
 for i in range(ni):
     problem = False
@@ -217,8 +232,7 @@ for i in range(ni):
 
     repaired = False     # flag for if we want to output a fixed set of files
 
-    # Read the audio files
-    #  x, y = data for input, target
+    # Read the audio files.  x, y = data for input, target
     x, sr_x = librosa.load(input_filename, sr=None, mono=False)
     y, sr_y = librosa.load(target_filename, sr=None, mono=False)
 
@@ -236,14 +250,19 @@ for i in range(ni):
         problem = True
 
     if args.mono:
-        x, y = x[0], y[0]
-        repaired = True
+        if len(x.shape) > 1:
+            x = x[0,:]
+            repaired = True
+        if len(y.shape) > 1:
+            y = y[0,:]
+            repaired = True
+
 
     ### Check timing alignment.  Slow
     if not args.fast:
         #Compute the time delay (argmax of cross-correlation) in samples
-        if DEBUG: print("    Calling estimate_time_shift (slow)...")
-        nx = x.shape[0]
+        if DEBUG: print("    Calling estimate_time_shift (slow)")
+        nx = len(x)
         short_len = nx//10       # 20-minute long audio files take a while, so use a subset
         dt = estimate_time_shift(x[0:short_len], y[0:short_len])
         if dt != 0:
@@ -272,5 +291,5 @@ for i in range(ni):
 
     if repaired: # save -- overwrite -- new versions of input & output
         print("       Overwriting new version of input and target...")
-        wavfile.write(input_filename, sr_x)
+        wavfile.write(input_filename, sr_x, x)
         wavfile.write(target_filename, sr_y, y)
