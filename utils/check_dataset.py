@@ -83,7 +83,7 @@ class colors():    # Because I'm lazy
     RESET = '\033[0m'
 
 
-def estimate_time_shift(x, y, sr = 44100):
+def estimate_time_shift(x, y):
     """ Computes the cross-correlation between time series x and y, grabs the
         index of where it's a maximum.  This yields the time difference in
         samples between x and y.
