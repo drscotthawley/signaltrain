@@ -47,9 +47,9 @@
 #  Example:
 #   $ ./check_dataset.py datasets/SignalTrain_LA2A_dataset_rev1/Train/*.wav
 # or
-#   $ ./check_dataset LA2A_Dataset/           # to check
+#   $ ./check_dataset.py LA2A_Dataset/           # to check
 #  then
-#   $ ./check_dataset --fix LA2A_Dataset/     # to fix everything
+#   $ ./check_dataset.py --fix LA2A_Dataset/     # to fix everything
 
 from scipy import signal
 import numpy as np
