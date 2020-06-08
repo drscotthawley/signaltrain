@@ -45,7 +45,7 @@ def is_number(string):
 
 
 def ranges_to_vals(str):
-    """instances of comma-separated pairs of max,min numbers
+    """replace instances of comma-separated pairs of max,min numbers
        with values randomly generated in between min & max (via uniform distribution)
     """
     out_str = ''                # this will be the final output
