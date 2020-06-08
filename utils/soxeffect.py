@@ -20,6 +20,11 @@ Alternative: supply a range  of settings, with commas separating min/max values:
 Results:
   A set of output files, one per input file, names in which 'target' is
   prepended and 'input removed' along with effect settings.
+
+
+TODO: Within each file it runs in parallel, But currently it only runs one
+file at a time, rather than spawning parallel  processes.  So if you have lots
+of files it can take a while due to latency.  
 """
 
 import numpy as np
