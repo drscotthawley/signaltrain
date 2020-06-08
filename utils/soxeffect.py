@@ -22,11 +22,8 @@ Results:
   prepended and 'input removed' along with effect settings.
 
 
-TODO: Within each file it runs in parallel, But currently it only runs one
-file at a time, rather than spawning parallel  processes.  So if you have lots
-of files it can take a while due to latency.
+NOTE: this runs in parallel, using all available CPUs.
 """
-
 import numpy as np
 import torch
 import sys
@@ -46,9 +43,10 @@ def is_number(string):
     except ValueError:
         return False
 
+
 def ranges_to_vals(str):
-    """replace the first instance of a comma-separated pair of max,min numbers
-       with a value randomly generated in between them
+    """instances of comma-separated pairs of max,min numbers
+       with values randomly generated in between min & max (via uniform distribution)
     """
     out_str = ''                # this will be the final output
     pvals, pranges = [], []     # list of parameter values used for naming files
@@ -64,6 +62,7 @@ def ranges_to_vals(str):
             pvals.append(valstr)
         out_str += f'{valstr} '
     return out_str, pvals, pranges
+
 
 def test_ranges_to_vals():   # just a sample test
     ranges_to_vals('0.7,.8 0.9 55.0 0.4 0.25,.3 2.0 -s')
@@ -88,16 +87,13 @@ def process_one_file(args_inputs, args_effect, args_params, i):
 
 
 if __name__ == "__main__":
-    # parse command line args
     parser = argparse.ArgumentParser(description="Applies a sox audio effect to lots of files",\
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('effect', help='Name of effect class for generating target')
     parser.add_argument('params', help='String of control settings')
     parser.add_argument('inputs', nargs='+', help='List of input files')
-
     args = parser.parse_args()
     print("args =",args)
-    n_ranges = args.params.count(',')   # How many paramter ranges were specified
 
     # parallel loop over all input files
     wrapper = partial(process_one_file, args.inputs, args.effect, args.params)
@@ -108,11 +104,9 @@ if __name__ == "__main__":
     pool.close()
     pool.join()
 
-    #for in_file in args.inputs:
-    #    process_one_file(in_file, args.params)
-
 
 print("\n\nCopy & paste the following to use as effect.ini file:\n")
+n_ranges = args.params.count(',')        # How many paramter ranges were specified
 if n_ranges > 1:
     knob_names = [f'p{n}' for n in range(n_ranges)]
     knob_ranges = pranges
