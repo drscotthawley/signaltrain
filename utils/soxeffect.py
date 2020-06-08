@@ -24,7 +24,7 @@ Results:
 
 TODO: Within each file it runs in parallel, But currently it only runs one
 file at a time, rather than spawning parallel  processes.  So if you have lots
-of files it can take a while due to latency.  
+of files it can take a while due to latency.
 """
 
 import numpy as np
@@ -34,9 +34,9 @@ import os
 sys.path.append('/home/shawley/signaltrain')
 sys.path.append('..')
 import signaltrain as st
-import glob
 import argparse
-import re
+from functools import partial
+import multiprocessing as mp
 
 
 def is_number(string):
@@ -69,6 +69,23 @@ def test_ranges_to_vals():   # just a sample test
     ranges_to_vals('0.7,.8 0.9 55.0 0.4 0.25,.3 2.0 -s')
 
 
+def process_one_file(args_inputs, args_effect, args_params, i):
+    """ Given one input file (name), run sox on it
+    """
+    in_file = args_inputs[i]
+    paramstr, pvals, pranges = ranges_to_vals(args_params)       # replace ranges with random #s
+    out_file = 'target'+in_file.replace('input','')     # remove input & prepent target
+    if len(pvals) > 0:
+        pvalstr = ''
+        for p in pvals:    # note that pvals are strings, not numbers
+            pvalstr += f'__{p}'
+    else:
+        pvalstr = '_1'
+    out_file = out_file.replace('_.wav',f'{pvalstr}.wav')
+    execstr = f'sox --multi-threaded {in_file} {out_file} {args_effect} {args_params}'
+    print("  execstr = ",execstr)
+    os.system(execstr)              # Execute sox for this setting
+
 
 if __name__ == "__main__":
     # parse command line args
@@ -82,20 +99,18 @@ if __name__ == "__main__":
     print("args =",args)
     n_ranges = args.params.count(',')   # How many paramter ranges were specified
 
-    # if there are no ranges to the effects, then just call sox on each file
-    for in_file in args.inputs:
-        paramstr, pvals, pranges = ranges_to_vals(args.params)       # replace ranges with random #s
-        out_file = 'target'+in_file.replace('input','')     # remove input & prepent target
-        if len(pvals) > 0:
-            pvalstr = ''
-            for p in pvals:    # note that pvals are strings, not numbers
-                pvalstr += f'__{p}'
-        else:
-            pvalstr = '_1'
-        out_file = out_file.replace('_.wav',f'{pvalstr}.wav')
-        execstr = f'sox --multi-threaded {in_file} {out_file} {args.effect} {paramstr}'
-        print("  execstr = ",execstr)
-        os.system(execstr)              # Execute sox for this setting
+    # parallel loop over all input files
+    wrapper = partial(process_one_file, args.inputs, args.effect, args.params)
+    num_procs = mp.cpu_count()
+    pool = mp.Pool(num_procs)
+    indices = range(len(args.inputs))
+    results = pool.map(wrapper, indices)
+    pool.close()
+    pool.join()
+
+    #for in_file in args.inputs:
+    #    process_one_file(in_file, args.params)
+
 
 print("\n\nCopy & paste the following to use as effect.ini file:\n")
 if n_ranges > 1:
