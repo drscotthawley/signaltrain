@@ -105,14 +105,14 @@ if __name__ == "__main__":
     pool.join()
 
 
-print("\n\nCopy & paste the following to use as effect.ini file:\n")
+print("\n\nCopy & paste the following to use as effect_info.ini file:\n")
 n_ranges = args.params.count(',')        # How many paramter ranges were specified
 if n_ranges > 1:
     knob_names = [f'p{n}' for n in range(n_ranges)]
     knob_ranges = pranges
 else:
     knob_names = "['p1']"
-    knob_ranges = "[.999, 1.001]"
+    knob_ranges = "[[.999, 1.001]]"
 
 print(f"""[effect]
 name = sox_{args.effect}
