@@ -159,3 +159,15 @@ Advisories re. options:
 4. What about parallelism?  In my experience, on my machines, running 'data parallel' on multiple GPUs only produces a small speedup (i.e. not worth it, better to run multiple triviall-parallel jobs learning different things). 
 
 
+### Citing This Work
+There are 'two versions' of the original SignalTrain paper. The original on arXiv was longer, but the 'official' version was a slightly shorter Category 1 paper at the 2019 fall AES conference.  Since the latter is the peer-reviewed version, we prefer that you cite that:
+```
+@conference{signaltrain,
+		title = {Profiling Audio Compressors with Deep Neural Networks},
+		author = {Hawley, Scott and Colburn, Benjamin and Mimilakis, Stylianos Ioannis},
+		booktitle = {Audio Engineering Society Convention 147},
+		month = {Oct},
+		year = {2019},
+		url = {http://www.aes.org/e-lib/browse.cfm?elib=20595}
+		}
+```
