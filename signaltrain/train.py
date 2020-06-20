@@ -43,7 +43,7 @@ def eval_status_save(model, effect, epoch, epochs, lr, mom, device, dataloader_v
         x_val_cuda, y_val_cuda, knobs_val_cuda = x_val.to(device), y_val.to(device), knobs_val.to(device)
 
         y_val_hat, mag_val, mag_val_hat = model.forward(x_val_cuda, knobs_val_cuda)
-        loss_val = loss_functions.calc_loss_old(y_val_hat.float(), y_val_cuda.float(), mag_val_hat.float(),
+        loss_val = loss_functions.calc_loss(y_val_hat.float(), y_val_cuda.float(), mag_val_hat.float(),
             scale_by_freq=scale_by_freq)#, l1_lambda=lr/1000 )
         vl_avg = beta*vl_avg + (1-beta)*loss_val.item()    # (running) average val loss
         if 0 == val_batch_num % status_every:
@@ -117,7 +117,7 @@ def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, m
                 scale_by_freq = torch.exp(expfac* torch.arange(0., mag_hat.size()[-1])).expand_as(mag_hat).float()
 
             # loss evaluation
-            loss = loss_functions.calc_loss_old(y_hat.float(), y_cuda.float(),
+            loss = loss_functions.calc_loss(y_hat.float(), y_cuda.float(),
                 mag_hat.float(), scale_by_freq=scale_by_freq)#, l1_lambda=lr/1000)
 
             # Status message

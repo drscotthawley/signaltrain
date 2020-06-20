@@ -123,7 +123,7 @@ class AsymAutoEncoder(nn.Module):
         if return_acts:
             return result, acts
         else:
-            return result
+            return result, []
 
 
 
