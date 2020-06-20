@@ -8,7 +8,7 @@ import scipy.signal as scipy_signal
 import torch
 #import torchaudio
 import librosa
-from numba import autojit, njit, jit   # Note: nopython version gives symbol errors when used w/ Jupyter Notebook, so using autojit instead
+from numba import jit   # Note: nopython version gives symbol errors when used w/ Jupyter Notebook, so using autojit instead
 import os
 import sys
 import glob
@@ -20,7 +20,7 @@ import warnings
 def random_ends(size=1): # probabilty dist. that emphasizes boundaries
     return np.random.beta(0.8,0.8,size=size)
 
-@autojit
+@jit
 def sliding_window(x, size, overlap=0):
     """
     Stacks 1D array into a series of sliding windows with a certain amount of overlaps.
@@ -345,7 +345,7 @@ def mu_decompand(y, mu=32):
 
 
 
-@autojit
+@jit
 def compressor(x, thresh=-24, ratio=2, attackrel=0.045, sr=44100.0, dtype=np.float32):
     """
     simple compressor effect, code thanks to Eric Tarr @hackaudio
