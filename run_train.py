@@ -22,10 +22,10 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         device = torch.device("cuda:0")
         torch.cuda.manual_seed(218)
-        torch.set_default_tensor_type('torch.cuda.FloatTensor')
+        #torch.set_default_tensor_type('torch.cuda.FloatTensor') #This line caused Dataloader to load the dataset onto CUDA GPU
     else:
         device = torch.device("cpu")
-        torch.set_default_tensor_type('torch.FloatTensor')
+        #torch.set_default_tensor_type('torch.FloatTensor')
 
 
     # Parse command line arguments

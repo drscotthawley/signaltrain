@@ -114,7 +114,8 @@ def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, m
             # set up loss weighting
             if scale_by_freq is None:
                 expfac = 7./mag_hat.size()[-1]   # exponential L1 loss scaling by ~1000 times (30dB) over freq range
-                scale_by_freq = torch.exp(expfac* torch.arange(0., mag_hat.size()[-1])).expand_as(mag_hat).float()
+                _scale_by_freq = torch.exp(expfac* torch.arange(0., mag_hat.size()[-1])).expand_as(mag_hat).float()
+                scale_by_freq = _scale_by_freq.to(device) #Since now the default tensor type is CPU, we have to move it into the same device with the model to calculate loss
 
             # loss evaluation
             loss = loss_functions.calc_loss(y_hat.float(), y_cuda.float(),
