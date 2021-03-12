@@ -127,7 +127,7 @@ class AsymAutoEncoder(nn.Module):
 
 
 
-'''
+
 # currently CNN version is unused because it's slow
 
 class cnnblock(nn.Module):
@@ -257,8 +257,8 @@ class AsymCNNAutoEncoder(nn.Module):
             out = self.relu(self.fnn_dec(z))
 
         result = out.transpose(2, 1)
-        return result
-'''
+        return result,[]
+
 
 
 class AsymMPAEC(nn.Module):
@@ -276,7 +276,7 @@ class AsymMPAEC(nn.Module):
            decomposition_rank:       size of first-smaller layer in autoencoder (we added more as we wrote this)
     """
     def __init__(self, expected_time_frames, ft_size=1024, hop_size=384,
-        decomposition_rank=64, n_knobs=4, output_tf=None):
+        decomposition_rank=64, n_knobs=4, output_tf=None, model_type="FC"):
         super(AsymMPAEC, self).__init__()
 
         print("AsymMPAEC: expected_time_frames, ft_size, hop_size, decomposition_rank, n_knobs, output_tf = ", expected_time_frames, ft_size, hop_size, decomposition_rank, n_knobs, output_tf)
@@ -287,8 +287,13 @@ class AsymMPAEC(nn.Module):
 
         self.dft_analysis = Analysis(ft_size=ft_size, hop_size=hop_size)
         self.dft_synthesis = Synthesis(ft_size=ft_size, hop_size=hop_size)
-        self.aenc = AsymAutoEncoder(T=expected_time_frames, R=decomposition_rank, K=n_knobs, OT=self.output_tf)
-        self.phs_aenc = AsymAutoEncoder(T=expected_time_frames, R=decomposition_rank, K=n_knobs, OT=self.output_tf)
+        if model_type=="FC":
+            self.aenc = AsymAutoEncoder(T=expected_time_frames, R=decomposition_rank, K=n_knobs, OT=self.output_tf)
+            self.phs_aenc = AsymAutoEncoder(T=expected_time_frames, R=decomposition_rank, K=n_knobs, OT=self.output_tf)
+        elif model_type=="CNN":
+            self.aenc = AsymCNNAutoEncoder(T=expected_time_frames, R=decomposition_rank, K=n_knobs, OT=self.output_tf)
+            self.phs_aenc = AsymCNNAutoEncoder(T=expected_time_frames, R=decomposition_rank, K=n_knobs, OT=self.output_tf)
+
         #self.valve = nn.Parameter(torch.tensor([0.2,1.0]), requires_grad=True)  # "wet-dry mix"
 
 
@@ -345,7 +350,7 @@ class st_model(nn.Module):
     """
     Wrapper routine for AsymMPAEC.  Enables generic call in case we change later
     """
-    def __init__(self, scale_factor=1, shrink_factor=4, num_knobs=3, sr=44100, scale_scheme='lean'):
+    def __init__(self, scale_factor=1, shrink_factor=4, num_knobs=3, sr=44100, scale_scheme='lean', model_type="FC"):
         """
             scale_factor: change dimensionality of run by this factor
             shrink_factor:  output shrink factor, i.e. fraction of output actually trained on
@@ -361,6 +366,7 @@ class st_model(nn.Module):
         self.scale_factor, self.shrink_factor = scale_factor, shrink_factor
         self.in_chunk_size, self.out_chunk_size = chunk_size, out_chunk_size
         self.num_knobs = num_knobs
+        self.model_type = model_type
 
         print("Input chunk size =",chunk_size)
         print("Intended Output chunk size =",out_chunk_size)
@@ -382,7 +388,7 @@ class st_model(nn.Module):
             print(f"Warning: y_size ({y_size}) should equal out_chunk_size ({out_chunk_size})")
             print(f"    Setting out_chunk_size = y_size = {y_size}")
         self.out_chunk_size = y_size
-        self.mpaec = AsymMPAEC(expected_time_frames, ft_size=ft_size, hop_size=hop_size, n_knobs=num_knobs, output_tf=output_time_frames)
+        self.mpaec = AsymMPAEC(expected_time_frames, ft_size=ft_size, hop_size=hop_size, n_knobs=num_knobs, output_tf=output_time_frames, model_type=model_type)
 
         #self.freeze()    # TODO: try this out another time
 
