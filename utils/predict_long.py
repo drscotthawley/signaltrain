@@ -120,6 +120,7 @@ if __name__ == "__main__":
     parser.add_argument('-e','--effect', help='Name of effect class for generating target', default='')
     parser.add_argument('--knobs', help='String of knob/control settings', default='')
     parser.add_argument('-c','--compand', help='Turn on to use companded/decompanded audio', action='store_true')
+    parser.add_argument('-m', '--model', help="type of model: FC or CNN", default="FC")
     # info is in checkpoint file  parser.add_argument('--path', help='Path from which to load file-based effects', default='')
     args = parser.parse_args()
     print("args =",args)
@@ -137,7 +138,7 @@ if __name__ == "__main__":
     print(f"knob_ranges = {knob_ranges}")
 
     # Setup model
-    model = nn_proc.st_model(scale_factor=scale_factor, shrink_factor=shrink_factor, num_knobs=num_knobs, sr=sr)
+    model = nn_proc.st_model(scale_factor=scale_factor, shrink_factor=shrink_factor, num_knobs=num_knobs, sr=sr, model_type=args.model)
     model.load_state_dict(state_dict)   # overwrite the weights using the checkpoint
     chunk_size = model.in_chunk_size
     out_chunk_size = model.out_chunk_size
