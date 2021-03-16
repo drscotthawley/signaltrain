@@ -48,6 +48,7 @@ The simplest (& recommended) way to install is via [Anaconda](https://www.anacon
     conda env create -f freeze.yml
     
 for windows users
+
     conda env create -f environment.yml
 
 This will create an environment called 'signaltrain' which you can enable via `conda activate signaltrain`.
