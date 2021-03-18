@@ -69,7 +69,7 @@ If you run into trouble installing, try installing individually the packages in 
 
 ...and/or, create a clean `conda` environment start from there. On Google Cloud Compute, I had to do the following
 
-    conda create --name signaltrain python=3.6
+    conda create --name signaltrain python=3.8
     conda activate signaltrain
     pip install -r requirements.txt
 
