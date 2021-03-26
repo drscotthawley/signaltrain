@@ -131,7 +131,7 @@ Copy `predict_long.py` to the root directory of the program, then
 
 	./predict_long.py modelcheckpoint.tar TEST_AUDIO.wav --effect EFFECT_NAME --knobs='a,b,c,d' 
 	
-Change TEST_AUDIO.wav to the name of your audio file, EFFECT_NAME is the name of the effect, and the string in the '' in  `--knobs='a,b,c,d' ` should be change to your desired knob settings.
+Change `TEST_AUDIO.wav` to the name of your audio file, `EFFECT_NAME` is the name of the effect, and the string in the '' in  `--knobs='a,b,c,d' ` should be change to your desired knob settings.
 
 ### Contents
 
