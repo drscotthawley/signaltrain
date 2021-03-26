@@ -40,38 +40,50 @@ Then cd into the directory
 
 	cd signaltrain
 
-After that, choose one of the following two methods: 
+Start from a clean environment
 
-#### Method 1.
-The simplest (& recommended) way to install is via [Anaconda](https://www.anaconda.com/) using the `freeze.yml` file:
+	conda create --name signaltrain python=3.8
 
-    conda env create -f freeze.yml
+Install the latest version of pytorch for your environment, e.g. in linux
+
+	conda install pytorch torchvision torchaudio cudatoolkit=11.1 -c pytorch -c conda-forge
+
+Then try running the program and install whatever it needs.
+
+Current not ready for the following methods.
+
+>After that, choose one of the following two methods: 
+
+>#### Method 1.
+>The simplest (& recommended) way to install is via [Anaconda](https://www.anaconda.com/) using the `freeze.yml` file:
+
+>    `conda env create -f freeze.yml`
     
-for windows users
+>for windows users
 
-    conda env create -f environment.yml
+>    `conda env create -f environment.yml`
 
-This will create an environment called 'signaltrain' which you can enable via `conda activate signaltrain`.
+>This will create an environment called 'signaltrain' which you can enable via `conda activate signaltrain`.
 
-Notes on this method: 
+>Notes on this method: 
 
-- if you want to give the environment a different name, you can run `conda env create -f freeze.yml --name <your_env_name>`)
-- this method will pull a particular version of CUDA.  If you already have CUDA installed, you may get an error like `RuntimeError: cuda runtime error (11) : invalid argument at /opt/conda/conda-bld/pytorch_1544174967633/work/aten/src/THC/THCGeneral.cpp:405`.  This is common when one mixes versions of CUDA.  You may wish to try Method 2.
+>- if you want to give the environment a different name, you can run `conda env create -f freeze.yml --name <your_env_name>`)
+>- this method will pull a particular version of CUDA.  If you already have CUDA installed, you may get an error like `RuntimeError: cuda runtime error (11) : invalid argument at /opt/conda/conda-bld/pytorch_1544174967633/work/aten/src/THC/THCGeneral.cpp:405`.  This is common when one mixes versions of CUDA.  You may wish to try Method 2.
 
-#### Method 2. 
-Alternatively, or if Method 1 fails, you can try pip and the `requirements.txt` file:
+>#### Method 2. 
+>Alternatively, or if Method 1 fails, you can try pip and the `requirements.txt` file:
 
-    pip install -r requirements.txt
+>    `pip install -r requirements.txt`
 
-If you run into trouble installing, try installing individually the packages in requirements.txt, e.g.
+>If you run into trouble installing, try installing individually the packages in requirements.txt, e.g.
 
-    conda install -c conda-forge librosa
+>    `conda install -c conda-forge librosa`
 
-...and/or, create a clean `conda` environment start from there. On Google Cloud Compute, I had to do the following
+>...and/or, create a clean `conda` environment start from there. On Google Cloud Compute, I had to do the following
 
-    conda create --name signaltrain python=3.8
-    conda activate signaltrain
-    pip install -r requirements.txt
+>    `conda create --name signaltrain python=3.8
+>    conda activate signaltrain
+>    pip install -r requirements.txt`
 
 ### Datasets
 
@@ -113,6 +125,13 @@ Advisories re. options:
 - The default number of epochs is 1000, which with other defaults will take 10.6 hours on a dedicated RTX 2080Ti GPU running in Mixed Precision.  You might want to set `--epochs 100` at first, or choose an even smaller number of epochs. 
 - **Working on it:** with the `--checkpoint <checkpoint.tar>` option, one *should* be able to start from earlier model checkpoint files (i.e., in order to use pre-trained weights), however changes in the model structure over time mean that some of the checkpoint files in this repo made from earlier model architectures are incompatible with the new model structure, resulting in conflicts.  We're working to update these files.
 
+### Using trained model on audio files
+
+Copy `predict_long.py` to the root directory of the program, then
+
+	./predict_long.py modelcheckpoint.tar TEST_AUDIO.wav --effect EFFECT_NAME --knobs='a,b,c,d' 
+	
+Change TEST_AUDIO.wav to the name of your audio file, EFFECT_NAME is the name of the effect, and the string in the '' in  `--knobs='a,b,c,d' ` should be change to your desired knob settings.
 
 ### Contents
 
