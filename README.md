@@ -24,8 +24,8 @@ Paper preprint at [https://arxiv.org/abs/1905.11928](https://arxiv.org/abs/1905.
 
 ### Main Requirements:
 
-- Python 3.6 or greater
-- [PyTorch](https://pytorch.org/) v1
+- Python 3.8 or greater
+- [PyTorch](https://pytorch.org/) v1.7.1
 - **Strongly recommended**: CUDA 9.0 or greater. (This code can work without CUDA but it would be slow and the installation procedure would need to follow Method 2 below.)
 
 see [requirements.txt](requirements.txt) for more. 
@@ -44,10 +44,10 @@ Start from a clean environment
 
 	conda create --name signaltrain python=3.8
 
-Install the latest version of pytorch for your environment, e.g. in linux
+Install suitable version of pytorch for your environment, e.g. in linux
 
-	conda install pytorch torchvision torchaudio cudatoolkit=11.1 -c pytorch -c conda-forge
-
+	conda install pytorch==1.7.1 torchvision==0.8.2 torchaudio==0.7.2 cudatoolkit=11.0 -c pytorch
+	
 Then try running the program and install whatever it needs.
 
 Current not ready for the following methods.
