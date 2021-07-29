@@ -12,7 +12,7 @@ authors:
 identifiers:
   - type: 'url'
     value: 'http://www.aes.org/e-lib/browse.cfm?elib=20595'
-title: "<a href=\"https://hedges.belmont.edu/\_shawley/signaltrain_paper_aes.pdf\">Profiling Audio Compressors with Deep Neural Networks</a>"
+title: "SignalTrain: Profiling Audio Compressors with Deep Neural Networks"
 url: 'http://www.aes.org/e-lib/browse.cfm?elib=20595'
 references:
   - abstract: 'learning audio effects with neural networks'
@@ -31,4 +31,4 @@ references:
     date-published: 2021-03-26
     year: 2021
     month: 3
-    type: 'book'
+    type: 'conference'
