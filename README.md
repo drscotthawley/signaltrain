@@ -11,7 +11,7 @@ Learning time-dependent nonlinear audio effects with neural networks
 
 Code Authors: Scott Hawley, Stylianos Mimilakis, with some code by Ben Colburn
 
-**Demo Page:** [http://www.signaltrain.ml](http://www.signaltrain.ml)
+**Demo Page:** [signaltrain.herokuapp.com/](signaltrain.herokuapp.com/)
 
 Other demo options: [Jupyter Notebook](https://github.com/drscotthawley/signaltrain/blob/master/demo/SliderDemo.ipynb), [Colab Notebook](https://colab.research.google.com/drive/1ZIij0CqfISDrgb3XclMrU-OILFDpQEJ0) (but the Colab runs very slow slow) 
 
