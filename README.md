@@ -24,8 +24,8 @@ Paper preprint at [https://arxiv.org/abs/1905.11928](https://arxiv.org/abs/1905.
 
 ### Main Requirements:
 
-- Python 3.6 or greater
-- [PyTorch](https://pytorch.org/) v1
+- Python 3.8 or greater
+- [PyTorch](https://pytorch.org/) v1.7.1
 - **Strongly recommended**: CUDA 9.0 or greater. (This code can work without CUDA but it would be slow and the installation procedure would need to follow Method 2 below.)
 
 see [requirements.txt](requirements.txt) for more. 
@@ -40,34 +40,50 @@ Then cd into the directory
 
 	cd signaltrain
 
-After that, choose one of the following two methods: 
+Start from a clean environment
 
-#### Method 1.
-The simplest (& recommended) way to install is via [Anaconda](https://www.anaconda.com/) using the `freeze.yml` file:
+	conda create --name signaltrain python=3.8
 
-    conda env create -f freeze.yml
+Install suitable version of pytorch for your environment, e.g. in linux
 
-This will create an environment called 'signaltrain' which you can enable via `conda activate signaltrain`.
+	conda install pytorch==1.7.1 torchvision==0.8.2 torchaudio==0.7.2 cudatoolkit=11.0 -c pytorch
+	
+Then try running the program and install whatever it needs.
 
-Notes on this method: 
+Current not ready for the following methods.
 
-- if you want to give the environment a different name, you can run `conda env create -f freeze.yml --name <your_env_name>`)
-- this method will pull a particular version of CUDA.  If you already have CUDA installed, you may get an error like `RuntimeError: cuda runtime error (11) : invalid argument at /opt/conda/conda-bld/pytorch_1544174967633/work/aten/src/THC/THCGeneral.cpp:405`.  This is common when one mixes versions of CUDA.  You may wish to try Method 2.
+>After that, choose one of the following two methods: 
 
-#### Method 2. 
-Alternatively, or if Method 1 fails, you can try pip and the `requirements.txt` file:
+>#### Method 1.
+>The simplest (& recommended) way to install is via [Anaconda](https://www.anaconda.com/) using the `freeze.yml` file:
 
-    pip install -r requirements.txt
+>    `conda env create -f freeze.yml`
+    
+>for windows users
 
-If you run into trouble installing, try installing individually the packages in requirements.txt, e.g.
+>    `conda env create -f environment.yml`
 
-    conda install -c conda-forge librosa
+>This will create an environment called 'signaltrain' which you can enable via `conda activate signaltrain`.
 
-...and/or, create a clean `conda` environment start from there. On Google Cloud Compute, I had to do the following
+>Notes on this method: 
 
-    conda create --name signaltrain python=3.6
-    conda activate signaltrain
-    pip install -r requirements.txt
+>- if you want to give the environment a different name, you can run `conda env create -f freeze.yml --name <your_env_name>`)
+>- this method will pull a particular version of CUDA.  If you already have CUDA installed, you may get an error like `RuntimeError: cuda runtime error (11) : invalid argument at /opt/conda/conda-bld/pytorch_1544174967633/work/aten/src/THC/THCGeneral.cpp:405`.  This is common when one mixes versions of CUDA.  You may wish to try Method 2.
+
+>#### Method 2. 
+>Alternatively, or if Method 1 fails, you can try pip and the `requirements.txt` file:
+
+>    `pip install -r requirements.txt`
+
+>If you run into trouble installing, try installing individually the packages in requirements.txt, e.g.
+
+>    `conda install -c conda-forge librosa`
+
+>...and/or, create a clean `conda` environment start from there. On Google Cloud Compute, I had to do the following
+
+>    `conda create --name signaltrain python=3.8
+>    conda activate signaltrain
+>    pip install -r requirements.txt`
 
 ### Datasets
 
@@ -109,6 +125,13 @@ Advisories re. options:
 - The default number of epochs is 1000, which with other defaults will take 10.6 hours on a dedicated RTX 2080Ti GPU running in Mixed Precision.  You might want to set `--epochs 100` at first, or choose an even smaller number of epochs. 
 - **Working on it:** with the `--checkpoint <checkpoint.tar>` option, one *should* be able to start from earlier model checkpoint files (i.e., in order to use pre-trained weights), however changes in the model structure over time mean that some of the checkpoint files in this repo made from earlier model architectures are incompatible with the new model structure, resulting in conflicts.  We're working to update these files.
 
+### Using trained model on audio files
+
+Copy `predict_long.py` to the root directory of the program, then
+
+	./predict_long.py modelcheckpoint.tar TEST_AUDIO.wav --effect EFFECT_NAME --knobs='a,b,c,d' 
+	
+Change `TEST_AUDIO.wav` to the name of your audio file, `EFFECT_NAME` is the name of the effect, and the string in the '' in  `--knobs='a,b,c,d' ` should be change to your desired knob settings.
 
 ### Contents
 

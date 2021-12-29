@@ -22,10 +22,10 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         device = torch.device("cuda:0")
         torch.cuda.manual_seed(218)
-        torch.set_default_tensor_type('torch.cuda.FloatTensor')
+        #torch.set_default_tensor_type('torch.cuda.FloatTensor')
     else:
         device = torch.device("cpu")
-        torch.set_default_tensor_type('torch.FloatTensor')
+        #torch.set_default_tensor_type('torch.FloatTensor')
 
 
     # Parse command line arguments
@@ -44,6 +44,7 @@ if __name__ == "__main__":
     parser.add_argument('--scale', type=float, help='Scale factor (of input size & whole model)', default=1.0)
     parser.add_argument('--shrink', type=int, help='Shink output chunk relative to input by this divisor', default=4)
     parser.add_argument('-t','--target', help="type of target: chunk or stream", default="stream")
+    parser.add_argument('-m','--model', help="type of model: FC or CNN", default="FC")
     args = parser.parse_args()
 
     # print command line as it was invoked (for reading nohup.out later)
@@ -95,12 +96,11 @@ if __name__ == "__main__":
     st.misc.print_choochoo(__version__)  #  ascii art is the hallmark of professionalism
 
     print("Running with args =",args)
-
     # call the trianing routine
     model = st.train.train(epochs=args.epochs, n_data_points=args.num, batch_size=args.batch, device=device, sr=args.sr,\
         effect=effect, datapath=args.path, scale_factor=args.scale, shrink_factor=args.shrink,
         apex_opt=args.apex, target_type=args.target, lr_max=args.lrmax, in_checkpointname=args.checkpoint,
-        compand=args.compand)
+        compand=args.compand, model_type=args.model)
 
     print("run_train.py: Execution completed.")
 # EOF

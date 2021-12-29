@@ -14,6 +14,7 @@ from signaltrain import audio, io_methods, learningrate, datasets, loss_function
 
 # NVIDIA Apex for mixed-precision training
 have_apex = False
+torch_amp = False
 try:
     from apex.parallel import DistributedDataParallel as DDP
     from apex.fp16_utils import *
@@ -23,11 +24,16 @@ try:
     print(" Good news!  Found APEX.")
 except ImportError:
     print("**** WARNING: Recommend that you install APEX from https://www.github.com/nvidia/apex to run this code.")
-
+    try:
+        from torch.cuda.amp import autocast, GradScaler
+        torch_amp = True
+        print("No APEX found! Using pytorch's native auto mixed precision instead.")
+    except ImportError:
+        print("****WARNING: Recommend that you install APEX or using a newer version of pytorch to run this code.")
 
 def eval_status_save(model, effect, epoch, epochs, lr, mom, device, dataloader_val, logfilename, first_time,
     beta, vl_avg, out_checkpointname, parallel, optimizer, data_point, smoothed_loss, y_size, sr, status_every,
-    plot_every=10, cp_every=25, scale_by_freq=None):
+    plot_every=100, cp_every=100, scale_by_freq=None):
     """
     Status messages and run-time diagnostics.
     Check Validation set, write files & give garious messages about how we're doing
@@ -89,6 +95,8 @@ def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, m
         See train() below for variable meanings -- this all used to be in there.
     """
     scale_by_freq = None  # we change this below; but we need to know the size of mag_hat to set it, so wait
+    if torch_amp:
+        scaler = GradScaler()
 
     # Loop over epochs
     iter_count, batch_num, status_every = 0, 0, 10   # some loop-related meta-variabled initializations
@@ -108,17 +116,29 @@ def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, m
             lr = lr_sched[min(iter_count, len(lr_sched)-1)]  # get value for learning rate
             mom = mom_sched[min(iter_count, len(mom_sched)-1)]
             data_point += batch_size
+            if torch_amp and have_apex!=True:
+                with autocast():
+                    y_hat, mag, mag_hat = model.forward(x_cuda, knobs_cuda) # feed-forward synthesis
 
-            y_hat, mag, mag_hat = model.forward(x_cuda, knobs_cuda) # feed-forward synthesis
+                    # set up loss weighting
+                    if scale_by_freq is None:
+                        expfac = 7./mag_hat.size()[-1]   # exponential L1 loss scaling by ~1000 times (30dB) over freq range
+                        _scale_by_freq = torch.exp(expfac* torch.arange(0., mag_hat.size()[-1])).expand_as(mag_hat).float()
+                        scale_by_freq = _scale_by_freq.to(device)
 
-            # set up loss weighting
-            if scale_by_freq is None:
-                expfac = 7./mag_hat.size()[-1]   # exponential L1 loss scaling by ~1000 times (30dB) over freq range
-                scale_by_freq = torch.exp(expfac* torch.arange(0., mag_hat.size()[-1])).expand_as(mag_hat).float()
+                    # loss evaluation
+                    loss = loss_functions.calc_loss(y_hat.float(), y_cuda.float(), mag_hat.float(), scale_by_freq=scale_by_freq)#, l1_lambda=lr/1000)
+            else:
+                y_hat, mag, mag_hat = model.forward(x_cuda, knobs_cuda) # feed-forward synthesis
 
-            # loss evaluation
-            loss = loss_functions.calc_loss(y_hat.float(), y_cuda.float(),
-                mag_hat.float(), scale_by_freq=scale_by_freq)#, l1_lambda=lr/1000)
+                # set up loss weighting
+                if scale_by_freq is None:
+                    expfac = 7./mag_hat.size()[-1]   # exponential L1 loss scaling by ~1000 times (30dB) over freq range
+                    _scale_by_freq = torch.exp(expfac* torch.arange(0., mag_hat.size()[-1])).expand_as(mag_hat).float()
+                    scale_by_freq = _scale_by_freq.to(device)
+
+                # loss evaluation
+                loss = loss_functions.calc_loss(y_hat.float(), y_cuda.float(), mag_hat.float(), scale_by_freq=scale_by_freq)#, l1_lambda=lr/1000)
 
             # Status message
             batch_num += 1
@@ -134,6 +154,11 @@ def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, m
                 with amp.scale_loss(loss, optimizer) as scaled_loss:
                     scaled_loss.backward()
                 torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), max_norm=1., norm_type=1)
+                optimizer.step()
+            elif torch_amp:
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
             else:
                 loss.backward()   # replace this with amp call
                 # Clip model norm
@@ -144,7 +169,7 @@ def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, m
                 else:
                     if hasattr(model, 'clip_grad_norm_'):
                         model.clip_grad_norm_()   # for non-DataParallel
-            optimizer.step()
+                optimizer.step()
 
             # Apply Learning rate scheduling
             optimizer.param_groups[0]['lr'] = lr     # adjust according to schedule
@@ -167,7 +192,7 @@ def train_loop(model, effect, device, optimizer, epochs, batch_size, lr_sched, m
 def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_size=20,
     device=torch.device("cuda:0"), plot_every=10, cp_every=25, sr=44100, datapath=None,
     scale_factor=1, shrink_factor=4, apex_opt="O0", target_type="stream", lr_max=1e-4,
-    in_checkpointname = 'modelcheckpoint.tar', compand=False):
+    in_checkpointname = 'modelcheckpoint.tar', compand=False, model_type="FC"):
     """
     Main training routine for signaltrain
 
@@ -209,7 +234,7 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
         chunk_size, out_chunk_size = rv['in_chunk_size'], rv['out_chunk_size']
 
     # initialize from scratch
-    model = nn_proc.st_model(scale_factor=scale_factor, shrink_factor=shrink_factor, num_knobs=num_knobs, sr=sr)
+    model = nn_proc.st_model(scale_factor=scale_factor, shrink_factor=shrink_factor, num_knobs=num_knobs, sr=sr, model_type=model_type)
     if state_dict != {}:
         model.load_state_dict(state_dict)   # overwrite the weights using the input checkpoint if it exists
     chunk_size, out_chunk_size = model.in_chunk_size, model.out_chunk_size
@@ -244,17 +269,16 @@ def train(effect=audio.Compressor_4c(), epochs=100, n_data_points=200000, batch_
             path=datapath+"/Val/", y_size=out_chunk_size, rerun=(target_type!="stream"), augment=False,
             compand=compand)
 
+
     dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=10, shuffle=True, worker_init_fn=datasets.worker_init) # need worker_init for more variance
     dataloader_val = DataLoader(dataset_val, batch_size=batch_size, num_workers=10, shuffle=False)
-
-
 
     # Mixed precision:  Initialize NVIDIA Apex/Amp.  Amp accepts either values or strings for
     #     the optional override arguments, for convenient interoperation with argparse.
     if have_apex:
         model, optimizer = amp.initialize(model, optimizer, opt_level=apex_opt)
-    else:
-        print("*** WARNING: No APEX available.")
+    elif torch_amp!=True:
+        print("*** WARNING: No APEX/Amp available.")
 
     # Copy model to (other) GPU if possbible
     parallel = False # SHH had trouble so am turning parallelism off.  #  torch.cuda.device_count() > 1
